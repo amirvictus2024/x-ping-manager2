@@ -97,12 +97,13 @@ bot.use((ctx, next) => {
 // ========================
 // مدیریت کانال‌ها
 // ========================
-
-// نمایش کانال‌ها به صورت دو ستونه
 bot.action('manage_channels', (ctx) => {
   ctx.answerCbQuery();
   if (botData.channels.length === 0) {
-    return ctx.reply('کانالی موجود نیست. لطفاً یک کانال اضافه کنید.');
+    return ctx.reply(
+      'کانالی موجود نیست. لطفاً یک کانال اضافه کنید.',
+      Markup.inlineKeyboard([[Markup.button.callback('➕ افزودن کانال', 'add_channel')]])
+    );
   }
   // چیدمان ۲ ستونه
   const buttons = [];
@@ -119,7 +120,7 @@ bot.action('manage_channels', (ctx) => {
   ctx.reply('کانال‌ها:', Markup.inlineKeyboard(buttons));
 });
 
-// افزودن کانال (دکمه "افزودن کانال" فعال می‌شود)
+// افزودن کانال
 bot.action('add_channel', (ctx) => {
   ctx.answerCbQuery();
   ctx.session.step = 'add_channel_username';
@@ -152,12 +153,12 @@ bot.on('text', (ctx) => {
     ctx.reply(`✅ کانال "${newChannel.title}" اضافه شد.`);
     ctx.session.step = null;
   }
-  // سایر مراحل دریافت متن (ارسال پیام، زمانبندی و غیره) در ادامه کد آمده‌اند...
-  
+  // سایر مراحل دریافت متن (ارسال پیام، زمانبندی و غیره)
   else if (step === 'send_message_text') {
     ctx.session.messageText = text;
     ctx.session.step = 'send_message_buttons';
-    ctx.reply('آیا می‌خواهید دکمه اضافه کنید؟\nدر صورت نیاز می‌توانید دکمه‌های چندتایی اضافه کنید.', 
+    ctx.reply(
+      'آیا می‌خواهید دکمه اضافه کنید؟\nدر صورت نیاز می‌توانید دکمه‌های چندتایی اضافه کنید.',
       Markup.inlineKeyboard([
         [Markup.button.callback('✅ بله', 'add_buttons'), Markup.button.callback('❌ خیر', 'send_message_now')]
       ])
@@ -170,7 +171,10 @@ bot.on('text', (ctx) => {
     if (!ctx.session.messageButtons) ctx.session.messageButtons = [];
     ctx.session.messageButtons.push({ text: ctx.session.currentButtonText, url: text });
     const preview = ctx.session.messageButtons.map(btn => `[${btn.text}](${btn.url})`).join('\n');
-    ctx.reply(`دکمه اضافه شد:\n${preview}\nبرای افزودن دکمه دیگر، مجدداً دکمه "✅ بله" را بزنید یا برای ارسال پیام "❌ خیر" را انتخاب کنید.`, { parse_mode: 'Markdown' });
+    ctx.reply(
+      `دکمه اضافه شد:\n${preview}\nبرای افزودن دکمه دیگر، دکمه "✅ بله" را بزنید یا برای ارسال پیام "❌ خیر" را انتخاب کنید.`,
+      { parse_mode: 'Markdown' }
+    );
     ctx.session.step = 'send_message_buttons';
   }
   else if (step === 'schedule_message_text') {
@@ -198,7 +202,8 @@ bot.on('text', (ctx) => {
     }
     ctx.session.delayMinutes = minutes;
     ctx.session.step = 'delay_message_buttons';
-    ctx.reply('آیا می‌خواهید دکمه به پیام اضافه شود؟ (در صورت نیاز)', 
+    ctx.reply(
+      'آیا می‌خواهید دکمه به پیام اضافه شود؟ (در صورت نیاز)',
       Markup.inlineKeyboard([
         [Markup.button.callback('✅ بله', 'delay_add_buttons'), Markup.button.callback('❌ خیر', 'send_delay_message_now')]
       ])
@@ -245,7 +250,10 @@ bot.on('text', (ctx) => {
 bot.action('send_message', (ctx) => {
   ctx.answerCbQuery();
   if (botData.channels.length === 0) {
-    return ctx.reply('کانالی موجود نیست. ابتدا یک کانال اضافه کنید.');
+    return ctx.reply(
+      'کانالی موجود نیست. ابتدا یک کانال اضافه کنید.',
+      Markup.inlineKeyboard([[Markup.button.callback('➕ افزودن کانال', 'add_channel')]])
+    );
   }
   // نمایش کانال‌ها به صورت دو ستونه
   const buttons = [];
@@ -293,11 +301,11 @@ bot.action('send_message_now', (ctx) => {
     parse_mode: 'HTML',
     reply_markup: inlineKeyboard.length ? { inline_keyboard: inlineKeyboard } : undefined
   })
-  .then(() => {
-    ctx.reply('✅ پیام ارسال شد.');
-    ctx.session = {};
-  })
-  .catch(err => ctx.reply(`❌ خطا: ${err.message}`));
+    .then(() => {
+      ctx.reply('✅ پیام ارسال شد.');
+      ctx.session = {};
+    })
+    .catch(err => ctx.reply(`❌ خطا: ${err.message}`));
 });
 
 // ========================
@@ -306,7 +314,10 @@ bot.action('send_message_now', (ctx) => {
 bot.action('schedule_message', (ctx) => {
   ctx.answerCbQuery();
   if (botData.channels.length === 0) {
-    return ctx.reply('کانالی موجود نیست. ابتدا یک کانال اضافه کنید.');
+    return ctx.reply(
+      'کانالی موجود نیست. ابتدا یک کانال اضافه کنید.',
+      Markup.inlineKeyboard([[Markup.button.callback('➕ افزودن کانال', 'add_channel')]])
+    );
   }
   // نمایش کانال‌ها به صورت دو ستونه
   const buttons = [];
@@ -361,7 +372,7 @@ bot.action('save_schedule', (ctx) => {
   ctx.session = {};
 });
 
-// انتخاب روز برای زمانبندی (متن ساده)
+// انتخاب روز برای زمانبندی
 bot.action(/schedule_day:(.+)/, (ctx) => {
   ctx.answerCbQuery();
   const day = ctx.match[1];
@@ -381,7 +392,10 @@ bot.action(/schedule_day:(.+)/, (ctx) => {
 bot.action('delay_message', (ctx) => {
   ctx.answerCbQuery();
   if (botData.channels.length === 0) {
-    return ctx.reply('کانالی موجود نیست. ابتدا یک کانال اضافه کنید.');
+    return ctx.reply(
+      'کانالی موجود نیست. ابتدا یک کانال اضافه کنید.',
+      Markup.inlineKeyboard([[Markup.button.callback('➕ افزودن کانال', 'add_channel')]])
+    );
   }
   // نمایش کانال‌ها به صورت دو ستونه
   const buttons = [];
@@ -443,7 +457,7 @@ bot.action('send_delay_message_now', (ctx) => {
       botData.delayedMessages = botData.delayedMessages.filter(msg => msg.id !== delayedMessageId);
       saveData();
     } catch (error) {
-      console.error('خطا در ارسال پیام با تأخیر:', error);
+      console.error('خطا در ارسال پیام تأخیری:', error);
     }
   }, delayMinutes * 60 * 1000);
 });
@@ -454,7 +468,10 @@ bot.action('send_delay_message_now', (ctx) => {
 bot.action('create_poll', (ctx) => {
   ctx.answerCbQuery();
   if (botData.channels.length === 0) {
-    return ctx.reply('کانالی موجود نیست. ابتدا یک کانال اضافه کنید.');
+    return ctx.reply(
+      'کانالی موجود نیست. ابتدا یک کانال اضافه کنید.',
+      Markup.inlineKeyboard([[Markup.button.callback('➕ افزودن کانال', 'add_channel')]])
+    );
   }
   // نمایش کانال‌ها به صورت دو ستونه
   const buttons = [];
@@ -529,7 +546,10 @@ bot.action(/set_welcome_group:(.+)/, (ctx) => {
 bot.action('get_members', (ctx) => {
   ctx.answerCbQuery();
   if (botData.channels.length === 0) {
-    return ctx.reply('کانالی موجود نیست. ابتدا یک کانال اضافه کنید.');
+    return ctx.reply(
+      'کانالی موجود نیست. ابتدا یک کانال اضافه کنید.',
+      Markup.inlineKeyboard([[Markup.button.callback('➕ افزودن کانال', 'add_channel')]])
+    );
   }
   // نمایش کانال‌ها به صورت دو ستونه
   const buttons = [];
@@ -570,7 +590,10 @@ bot.action(/get_members_channel:(.+)/, (ctx) => {
 bot.action('manage_messages', (ctx) => {
   ctx.answerCbQuery();
   if (botData.channels.length === 0) {
-    return ctx.reply('کانالی موجود نیست. ابتدا یک کانال اضافه کنید.');
+    return ctx.reply(
+      'کانالی موجود نیست. ابتدا یک کانال اضافه کنید.',
+      Markup.inlineKeyboard([[Markup.button.callback('➕ افزودن کانال', 'add_channel')]])
+    );
   }
   // نمایش کانال‌ها به صورت دو ستونه
   const buttons = [];
