@@ -1,696 +1,411 @@
-const { Telegraf, Markup } = require('telegraf');
+const { Telegraf, Markup, session } = require('telegraf');
 const fs = require('fs');
 const cron = require('node-cron');
 const moment = require('moment');
 
-// Data storage paths
+// تنظیمات اولیه
+const BOT_TOKEN = '8069263840:AAF2JTFJl6cfo7z1rU_CegYnCNJH6bLXcg0'; // توکن ربات (به صورت ثابت داخل کد)
+const ADMIN_ID = 6712954701; // آی‌دی تلگرامی ادمین
 const DATA_FILE = 'bot_data.json';
 
-// Initialize bot
-const BOT_TOKEN = '8069263840:AAF2JTFJl6cfo7z1rU_CegYnCNJH6bLXcg0'; // Replace with your bot token
-const ADMIN_ID = 6712954701; // Replace with your numeric Telegram ID
-
-// Data structure
+// ساختار داده‌های ربات
 let botData = {
   scheduledMessages: [],
   welcomeMessages: {},
-  polls: [],
   channels: [],
   delayedMessages: []
 };
 
-// Load data from file if exists
+// بارگذاری اطلاعات از فایل (در صورت وجود)
 function loadData() {
   try {
     if (fs.existsSync(DATA_FILE)) {
       const data = fs.readFileSync(DATA_FILE, 'utf8');
       botData = JSON.parse(data);
-      console.log('Data loaded successfully');
+      console.log('اطلاعات با موفقیت بارگذاری شد.');
     }
   } catch (error) {
-    console.error('Error loading data:', error);
+    console.error('خطا در بارگذاری اطلاعات:', error);
   }
 }
 
-// Save data to file
+// ذخیره اطلاعات به فایل
 function saveData() {
   try {
-    const serialized = JSON.stringify(botData, null, 2);
-    fs.writeFileSync(DATA_FILE, serialized, 'utf8');
-    console.log('Data saved successfully');
+    fs.writeFileSync(DATA_FILE, JSON.stringify(botData, null, 2), 'utf8');
+    console.log('اطلاعات ذخیره شد.');
   } catch (error) {
-    console.error('Error saving data:', error);
+    console.error('خطا در ذخیره اطلاعات:', error);
   }
 }
 
-// Check if user is admin
+// بررسی ادمین بودن کاربر
 function isAdmin(ctx) {
   return ctx.from && ctx.from.id === ADMIN_ID;
 }
 
-// Admin middleware
-function adminMiddleware(ctx, next) {
-  if (isAdmin(ctx)) {
-    return next();
-  } else {
-    ctx.reply('⛔️ شما دسترسی به این بخش را ندارید.');
-  }
-}
-
-// Main admin panel
-async function showAdminPanel(ctx) {
-  await ctx.reply('🖥 پنل مدیریت کانال', {
-    reply_markup: Markup.inlineKeyboard([
-      [Markup.button.callback('📝 ارسال پیام', 'send_message')],
-      [Markup.button.callback('⏱ زمانبندی پیام', 'schedule_message')],
-      [Markup.button.callback('⏲ پیام با تاخیر', 'delay_message')],
-      [Markup.button.callback('📊 ایجاد نظرسنجی', 'create_poll')],
-      [Markup.button.callback('👋 تنظیم پیام خوشامدگویی', 'set_welcome')],
-      [Markup.button.callback('👥 دریافت لیست اعضا', 'get_members')],
-      [Markup.button.callback('📺 مدیریت کانال‌ها', 'manage_channels')],
-      [Markup.button.callback('🔄 مدیریت پیام‌ها', 'manage_messages')]
-    ])
-  });
-}
-
-// Initialize bot
 const bot = new Telegraf(BOT_TOKEN);
 
-// Setup commands
-bot.start(async (ctx) => {
+// استفاده از middleware مدیریت جلسه telegraf
+bot.use(session());
+
+// نمایش پنل مدیریت در تلگرام
+function showAdminPanel(ctx) {
+  ctx.reply('🖥 پنل مدیریت:', Markup.inlineKeyboard([
+    [Markup.button.callback('📝 ارسال پیام', 'send_message')],
+    [Markup.button.callback('⏱ زمانبندی پیام', 'schedule_message')],
+    [Markup.button.callback('⏲ پیام با تأخیر', 'delay_message')],
+    [Markup.button.callback('📊 ایجاد نظرسنجی', 'create_poll')],
+    [Markup.button.callback('👋 پیام خوشامدگویی', 'set_welcome')],
+    [Markup.button.callback('👥 اعضای کانال', 'get_members')],
+    [Markup.button.callback('📺 مدیریت کانال‌ها', 'manage_channels')],
+    [Markup.button.callback('🔄 مدیریت پیام‌ها', 'manage_messages')]
+  ]));
+}
+
+// دستور start
+bot.start((ctx) => {
   if (isAdmin(ctx)) {
-    await ctx.reply(`سلام ${ctx.from.first_name}! به ربات مدیریت کانال خوش آمدید.`);
+    ctx.reply(`سلام ${ctx.from.first_name}، به ربات مدیریت خوش آمدید!`);
     showAdminPanel(ctx);
   } else {
-    await ctx.reply('این ربات فقط برای مدیر قابل استفاده است.');
+    ctx.reply('این ربات فقط برای مدیر مجاز است.');
   }
 });
 
-bot.help(async (ctx) => {
+bot.command('panel', (ctx) => {
   if (isAdmin(ctx)) {
-    await ctx.reply(`
-🔹 راهنمای ربات مدیریت کانال:
-
-/start - شروع کار با ربات
-/panel - نمایش پنل مدیریت
-/help - نمایش این راهنما
-    `);
+    showAdminPanel(ctx);
+  } else {
+    ctx.reply('دسترسی ندارید.');
   }
 });
 
-bot.command('panel', adminMiddleware, async (ctx) => {
-  await showAdminPanel(ctx);
-});
-
-// Handle inline buttons
-bot.action('send_message', adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-  ctx.session = { step: 'send_message_select_channel' };
-
-  const channelButtons = botData.channels.map(channel => 
-    [Markup.button.callback(channel.title, `select_channel:${channel.id}`)]
-  );
-
-  if (channelButtons.length === 0) {
-    return ctx.reply('ابتدا کانالی را اضافه کنید', {
-      reply_markup: Markup.inlineKeyboard([
-        [Markup.button.callback('افزودن کانال', 'add_channel')],
-        [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
-      ])
-    });
+// middleware محدودسازی دسترسی برای callbackها
+bot.use((ctx, next) => {
+  if ((ctx.callbackQuery || ctx.updateType === 'message') && !isAdmin(ctx)) {
+    return ctx.reply('⛔️ شما دسترسی به این بخش را ندارید.');
   }
-
-  channelButtons.push([Markup.button.callback('🔙 بازگشت', 'back_to_main')]);
-
-  ctx.reply('لطفا کانال مورد نظر را انتخاب کنید:', {
-    reply_markup: Markup.inlineKeyboard(channelButtons)
-  });
+  return next();
 });
 
-bot.action(/select_channel:(.+)/, adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-  const channelId = ctx.match[1];
-  ctx.session.selectedChannel = channelId;
-  ctx.session.step = 'send_message_text';
+// ========================
+// مدیریت کانال‌ها
+// ========================
 
-  ctx.reply('متن پیام را وارد کنید:', {
-    reply_markup: Markup.inlineKeyboard([
-      [Markup.button.callback('🔙 بازگشت', 'send_message')]
-    ])
-  });
-});
-
-// Add message buttons
-bot.action('add_buttons', adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-  ctx.session.step = 'add_button_text';
-  ctx.session.messageButtons = ctx.session.messageButtons || [];
-
-  ctx.reply('متن دکمه را وارد کنید:', {
-    reply_markup: Markup.inlineKeyboard([
-      [Markup.button.callback('پایان افزودن دکمه', 'finish_buttons')],
+// نمایش پنل مدیریت کانال‌ها
+bot.action('manage_channels', (ctx) => {
+  ctx.answerCbQuery();
+  if (botData.channels.length === 0) {
+    return ctx.reply('ابتدا کانالی اضافه کنید.', Markup.inlineKeyboard([
+      [Markup.button.callback('➕ افزودن کانال', 'add_channel')],
       [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
-    ])
-  });
-});
-
-// Schedule message handler
-bot.action('schedule_message', adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-  ctx.session = { step: 'schedule_select_channel' };
-
-  const channelButtons = botData.channels.map(channel => 
-    [Markup.button.callback(channel.title, `schedule_channel:${channel.id}`)]
-  );
-
-  if (channelButtons.length === 0) {
-    return ctx.reply('ابتدا کانالی را اضافه کنید', {
-      reply_markup: Markup.inlineKeyboard([
-        [Markup.button.callback('افزودن کانال', 'add_channel')],
-        [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
-      ])
-    });
+    ]));
   }
-
-  channelButtons.push([Markup.button.callback('🔙 بازگشت', 'back_to_main')]);
-
-  ctx.reply('لطفا کانال مورد نظر برای زمانبندی پیام را انتخاب کنید:', {
-    reply_markup: Markup.inlineKeyboard(channelButtons)
-  });
-});
-
-// Delay message handler
-bot.action('delay_message', adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-  ctx.session = { step: 'delay_select_channel' };
-
-  const channelButtons = botData.channels.map(channel => 
-    [Markup.button.callback(channel.title, `delay_channel:${channel.id}`)]
+  const buttons = botData.channels.map(ch =>
+    [Markup.button.callback(`${ch.title}`, `channel_info:${ch.id}`)]
   );
-
-  if (channelButtons.length === 0) {
-    return ctx.reply('ابتدا کانالی را اضافه کنید', {
-      reply_markup: Markup.inlineKeyboard([
-        [Markup.button.callback('افزودن کانال', 'add_channel')],
-        [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
-      ])
-    });
-  }
-
-  channelButtons.push([Markup.button.callback('🔙 بازگشت', 'back_to_main')]);
-
-  ctx.reply('لطفا کانال مورد نظر برای ارسال پیام با تاخیر را انتخاب کنید:', {
-    reply_markup: Markup.inlineKeyboard(channelButtons)
-  });
+  buttons.push([Markup.button.callback('➕ افزودن کانال جدید', 'add_channel')]);
+  buttons.push([Markup.button.callback('🔙 بازگشت', 'back_to_main')]);
+  ctx.reply('مدیریت کانال‌ها:', Markup.inlineKeyboard(buttons));
 });
 
-// Create poll handler
-bot.action('create_poll', adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-  ctx.session = { step: 'poll_select_channel' };
-
-  const channelButtons = botData.channels.map(channel => 
-    [Markup.button.callback(channel.title, `poll_channel:${channel.id}`)]
-  );
-
-  if (channelButtons.length === 0) {
-    return ctx.reply('ابتدا کانالی را اضافه کنید', {
-      reply_markup: Markup.inlineKeyboard([
-        [Markup.button.callback('افزودن کانال', 'add_channel')],
-        [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
-      ])
-    });
-  }
-
-  channelButtons.push([Markup.button.callback('🔙 بازگشت', 'back_to_main')]);
-
-  ctx.reply('لطفا کانال مورد نظر برای ایجاد نظرسنجی را انتخاب کنید:', {
-    reply_markup: Markup.inlineKeyboard(channelButtons)
-  });
+// افزودن کانال
+bot.action('add_channel', (ctx) => {
+  ctx.answerCbQuery();
+  ctx.session.step = 'add_channel_username';
+  ctx.reply('لطفاً نام کاربری کانال (با @) یا شناسه عددی را وارد کنید:', Markup.inlineKeyboard([
+    [Markup.button.callback('🔙 بازگشت', 'manage_channels')]
+  ]));
 });
 
-// Manage channels
-bot.action('manage_channels', adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-
-  const channelButtons = botData.channels.map(channel => 
-    [Markup.button.callback(`${channel.title}`, `channel_info:${channel.id}`)]
-  );
-
-  channelButtons.push([Markup.button.callback('➕ افزودن کانال جدید', 'add_channel')]);
-  channelButtons.push([Markup.button.callback('🔙 بازگشت', 'back_to_main')]);
-
-  ctx.reply('مدیریت کانال‌ها:', {
-    reply_markup: Markup.inlineKeyboard(channelButtons)
-  });
-});
-
-// Add channel handler
-bot.action('add_channel', adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-  ctx.session = { step: 'add_channel_username' };
-
-  ctx.reply('لطفا نام کاربری کانال را با @ وارد کنید یا شناسه عددی آن را بفرستید:', {
-    reply_markup: Markup.inlineKeyboard([
-      [Markup.button.callback('🔙 بازگشت', 'manage_channels')]
-    ])
-  });
-});
-
-// Manage messages
-bot.action('manage_messages', adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-
-  const channelButtons = botData.channels.map(channel => 
-    [Markup.button.callback(`${channel.title}`, `manage_messages_channel:${channel.id}`)]
-  );
-
-  if (channelButtons.length === 0) {
-    return ctx.reply('ابتدا کانالی را اضافه کنید', {
-      reply_markup: Markup.inlineKeyboard([
-        [Markup.button.callback('افزودن کانال', 'add_channel')],
-        [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
-      ])
-    });
-  }
-
-  channelButtons.push([Markup.button.callback('🔙 بازگشت', 'back_to_main')]);
-
-  ctx.reply('مدیریت پیام‌ها - کانال مورد نظر را انتخاب کنید:', {
-    reply_markup: Markup.inlineKeyboard(channelButtons)
-  });
-});
-
-// Welcome message setup
-bot.action('set_welcome', adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-
-  const groupButtons = botData.channels
-    .filter(channel => channel.type === 'group')
-    .map(group => [Markup.button.callback(group.title, `set_welcome_group:${group.id}`)]);
-
-  if (groupButtons.length === 0) {
-    return ctx.reply('ابتدا گروهی را اضافه کنید', {
-      reply_markup: Markup.inlineKeyboard([
-        [Markup.button.callback('افزودن گروه', 'add_channel')],
-        [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
-      ])
-    });
-  }
-
-  groupButtons.push([Markup.button.callback('🔙 بازگشت', 'back_to_main')]);
-
-  ctx.reply('انتخاب گروه برای تنظیم پیام خوشامدگویی:', {
-    reply_markup: Markup.inlineKeyboard(groupButtons)
-  });
-});
-
-// Get members
-bot.action('get_members', adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-
-  const channelButtons = botData.channels.map(channel => 
-    [Markup.button.callback(channel.title, `get_members_channel:${channel.id}`)]
-  );
-
-  if (channelButtons.length === 0) {
-    return ctx.reply('ابتدا کانالی را اضافه کنید', {
-      reply_markup: Markup.inlineKeyboard([
-        [Markup.button.callback('افزودن کانال', 'add_channel')],
-        [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
-      ])
-    });
-  }
-
-  channelButtons.push([Markup.button.callback('🔙 بازگشت', 'back_to_main')]);
-
-  ctx.reply('دریافت لیست اعضا - کانال مورد نظر را انتخاب کنید:', {
-    reply_markup: Markup.inlineKeyboard(channelButtons)
-  });
-});
-
-// Back to main menu
-bot.action('back_to_main', adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-  showAdminPanel(ctx);
-});
-
-// Handle text messages for various steps
-bot.on('text', async (ctx) => {
+// دریافت متن مربوط به افزودن کانال
+bot.on('text', (ctx) => {
   if (!isAdmin(ctx)) return;
+  const text = ctx.message.text.trim();
+  const step = ctx.session.step;
 
-  const text = ctx.message.text;
-  const session = ctx.session || {};
-
-  switch (session.step) {
-    case 'send_message_text':
-      ctx.session.messageText = text;
-      ctx.session.step = 'send_message_buttons';
-      ctx.reply('آیا می‌خواهید دکمه‌هایی به پیام اضافه کنید؟', {
-        reply_markup: Markup.inlineKeyboard([
-          [Markup.button.callback('✅ بله', 'add_buttons')],
-          [Markup.button.callback('❌ خیر', 'send_message_now')]
-        ])
-      });
-      break;
-
-    case 'add_button_text':
-      ctx.session.currentButtonText = text;
-      ctx.session.step = 'add_button_url';
-      ctx.reply('لینک دکمه را وارد کنید:', {
-        reply_markup: Markup.inlineKeyboard([
-          [Markup.button.callback('🔙 بازگشت', 'add_buttons')]
-        ])
-      });
-      break;
-
-    case 'add_button_url':
-      if (!ctx.session.messageButtons) ctx.session.messageButtons = [];
-      ctx.session.messageButtons.push({
-        text: ctx.session.currentButtonText,
-        url: text
-      });
-
-      const buttonsPreview = ctx.session.messageButtons.map(btn => `[${btn.text}](${btn.url})`).join('\n');
-
-      ctx.reply(`دکمه اضافه شد. دکمه‌های فعلی:\n${buttonsPreview}`, {
-        parse_mode: 'Markdown',
-        reply_markup: Markup.inlineKeyboard([
-          [Markup.button.callback('➕ افزودن دکمه دیگر', 'add_buttons')],
-          [Markup.button.callback('✅ پایان و ارسال', 'send_message_now')]
-        ])
-      });
-      ctx.session.step = 'send_message_buttons';
-      break;
-
-    case 'add_channel_username':
-      const channelId = text.startsWith('@') ? text : text;
-
-      // Check if channel already exists
-      const existingChannel = botData.channels.find(ch => ch.id === channelId);
-      if (existingChannel) {
-        ctx.reply('این کانال قبلا اضافه شده است!', {
-          reply_markup: Markup.inlineKeyboard([
-            [Markup.button.callback('🔙 بازگشت', 'manage_channels')]
-          ])
-        });
-        break;
-      }
-
-      ctx.session.newChannelId = channelId;
-      ctx.session.step = 'add_channel_title';
-      ctx.reply('نام نمایشی کانال را وارد کنید:', {
-        reply_markup: Markup.inlineKeyboard([
-          [Markup.button.callback('🔙 بازگشت', 'add_channel')]
-        ])
-      });
-      break;
-
-    case 'add_channel_title':
-      const newChannel = {
-        id: ctx.session.newChannelId,
-        title: text,
-        type: ctx.session.newChannelId.startsWith('@') ? 'channel' : 'group'
-      };
-
-      botData.channels.push(newChannel);
-      saveData();
-
-      ctx.reply(`✅ کانال "${text}" با موفقیت اضافه شد.`, {
-        reply_markup: Markup.inlineKeyboard([
-          [Markup.button.callback('🔙 بازگشت به مدیریت کانال‌ها', 'manage_channels')]
-        ])
-      });
-      break;
-
-    case 'schedule_message_text':
-      ctx.session.scheduleMessageText = text;
-      ctx.session.step = 'schedule_message_time';
-      ctx.reply('زمان ارسال را به فرمت HH:MM وارد کنید (مثال: 14:30):', {
-        reply_markup: Markup.inlineKeyboard([
-          [Markup.button.callback('🔙 بازگشت', 'schedule_message')]
-        ])
-      });
-      break;
-
-    case 'schedule_message_time':
-      // Validate time format
-      if (!/^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$/.test(text)) {
-        ctx.reply('فرمت زمان اشتباه است. لطفا به صورت HH:MM وارد کنید (مثال: 14:30)');
-        break;
-      }
-
-      ctx.session.scheduleTime = text;
-      ctx.session.step = 'schedule_message_days';
-
-      ctx.reply('روزهای ارسال را انتخاب کنید:', {
-        reply_markup: Markup.inlineKeyboard([
-          [
-            Markup.button.callback('شنبه', 'schedule_day:6'),
-            Markup.button.callback('یکشنبه', 'schedule_day:0'),
-            Markup.button.callback('دوشنبه', 'schedule_day:1')
-          ],
-          [
-            Markup.button.callback('سه‌شنبه', 'schedule_day:2'),
-            Markup.button.callback('چهارشنبه', 'schedule_day:3'),
-            Markup.button.callback('پنجشنبه', 'schedule_day:4')
-          ],
-          [
-            Markup.button.callback('جمعه', 'schedule_day:5'),
-            Markup.button.callback('هر روز', 'schedule_day:all')
-          ],
-          [Markup.button.callback('✅ تأیید و ذخیره', 'save_schedule')],
-          [Markup.button.callback('🔙 بازگشت', 'schedule_message')]
-        ])
-      });
-      break;
-
-    case 'delay_message_text':
-      ctx.session.delayMessageText = text;
-      ctx.session.step = 'delay_message_minutes';
-      ctx.reply('تعداد دقیقه تاخیر را وارد کنید (مثال: 30):', {
-        reply_markup: Markup.inlineKeyboard([
-          [Markup.button.callback('🔙 بازگشت', 'delay_message')]
-        ])
-      });
-      break;
-
-    case 'delay_message_minutes':
-      // Validate minutes
-      const minutes = parseInt(text);
-      if (isNaN(minutes) || minutes <= 0) {
-        ctx.reply('لطفا یک عدد مثبت وارد کنید');
-        break;
-      }
-
-      ctx.session.delayMinutes = minutes;
-      ctx.session.step = 'delay_message_buttons';
-      ctx.reply('آیا می‌خواهید دکمه‌هایی به پیام اضافه کنید؟', {
-        reply_markup: Markup.inlineKeyboard([
-          [Markup.button.callback('✅ بله', 'delay_add_buttons')],
-          [Markup.button.callback('❌ خیر', 'send_delay_message_now')]
-        ])
-      });
-      break;
-
-    case 'poll_question':
-      ctx.session.pollQuestion = text;
-      ctx.session.pollOptions = [];
-      ctx.session.step = 'poll_options';
-      ctx.reply('گزینه اول را وارد کنید:', {
-        reply_markup: Markup.inlineKeyboard([
-          [Markup.button.callback('🔙 بازگشت', 'create_poll')]
-        ])
-      });
-      break;
-
-    case 'poll_options':
-      if (!ctx.session.pollOptions) ctx.session.pollOptions = [];
-
-      ctx.session.pollOptions.push(text);
-
-      if (ctx.session.pollOptions.length >= 10) {
-        const optionsPreview = ctx.session.pollOptions.map((opt, i) => `${i+1}. ${opt}`).join('\n');
-
-        ctx.reply(`حداکثر تعداد گزینه‌ها اضافه شد. گزینه‌های فعلی:\n${optionsPreview}`, {
-          reply_markup: Markup.inlineKeyboard([
-            [Markup.button.callback('✅ ایجاد نظرسنجی', 'create_poll_now')]
-          ])
-        });
-        break;
-      }
-
+  if (step === 'add_channel_username') {
+    // بررسی وجود کانال تکراری
+    if (botData.channels.find(ch => ch.id === text)) {
+      ctx.reply('این کانال قبلاً اضافه شده است.', Markup.inlineKeyboard([
+        [Markup.button.callback('🔙 بازگشت', 'manage_channels')]
+      ]));
+      ctx.session.step = null;
+      return;
+    }
+    ctx.session.newChannelId = text;
+    ctx.session.step = 'add_channel_title';
+    ctx.reply('نام نمایشی کانال را وارد کنید:', Markup.inlineKeyboard([
+      [Markup.button.callback('🔙 بازگشت', 'add_channel')]
+    ]));
+  } else if (step === 'add_channel_title') {
+    const newChannel = {
+      id: ctx.session.newChannelId,
+      title: text,
+      type: ctx.session.newChannelId.startsWith('@') ? 'channel' : 'group'
+    };
+    botData.channels.push(newChannel);
+    saveData();
+    ctx.reply(`✅ کانال "${newChannel.title}" اضافه شد.`, Markup.inlineKeyboard([
+      [Markup.button.callback('🔙 بازگشت به مدیریت کانال‌ها', 'manage_channels')]
+    ]));
+    ctx.session.step = null;
+  }
+  // ==============================
+  // دریافت متن مراحل دیگر
+  // ==============================
+  else if (step === 'send_message_text') {
+    ctx.session.messageText = text;
+    ctx.session.step = 'send_message_buttons';
+    ctx.reply('آیا می‌خواهید دکمه اضافه کنید؟', Markup.inlineKeyboard([
+      [Markup.button.callback('✅ بله', 'add_buttons')],
+      [Markup.button.callback('❌ خیر', 'send_message_now')]
+    ]));
+  } else if (step === 'add_button_text') {
+    ctx.session.currentButtonText = text;
+    ctx.session.step = 'add_button_url';
+    ctx.reply('لینک دکمه را وارد کنید:', Markup.inlineKeyboard([
+      [Markup.button.callback('🔙 بازگشت', 'add_buttons')]
+    ]));
+  } else if (step === 'add_button_url') {
+    if (!ctx.session.messageButtons) ctx.session.messageButtons = [];
+    ctx.session.messageButtons.push({
+      text: ctx.session.currentButtonText,
+      url: text
+    });
+    const preview = ctx.session.messageButtons.map(btn => `[${btn.text}](${btn.url})`).join('\n');
+    ctx.reply(`دکمه اضافه شد:\n${preview}`, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([
+      [Markup.button.callback('➕ افزودن دکمه دیگر', 'add_buttons')],
+      [Markup.button.callback('✅ ارسال پیام', 'send_message_now')]
+    ])});
+    ctx.session.step = 'send_message_buttons';
+  } else if (step === 'schedule_message_text') {
+    ctx.session.scheduleMessageText = text;
+    ctx.session.step = 'schedule_message_time';
+    ctx.reply('زمان ارسال را به فرمت HH:MM وارد کنید (مثلاً 14:30):', Markup.inlineKeyboard([
+      [Markup.button.callback('🔙 بازگشت', 'schedule_message')]
+    ]));
+  } else if (step === 'schedule_message_time') {
+    if (!/^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$/.test(text)) {
+      return ctx.reply('فرمت زمان اشتباه است. لطفاً به صورت HH:MM وارد کنید.');
+    }
+    ctx.session.scheduleTime = text;
+    ctx.session.step = 'schedule_message_days';
+    ctx.reply('روزهای ارسال را انتخاب کنید:', Markup.inlineKeyboard([
+      [
+        Markup.button.callback('شنبه', 'schedule_day:6'),
+        Markup.button.callback('یکشنبه', 'schedule_day:0'),
+        Markup.button.callback('دوشنبه', 'schedule_day:1')
+      ],
+      [
+        Markup.button.callback('سه‌شنبه', 'schedule_day:2'),
+        Markup.button.callback('چهارشنبه', 'schedule_day:3'),
+        Markup.button.callback('پنجشنبه', 'schedule_day:4')
+      ],
+      [
+        Markup.button.callback('جمعه', 'schedule_day:5'),
+        Markup.button.callback('هر روز', 'schedule_day:all')
+      ],
+      [Markup.button.callback('✅ ذخیره', 'save_schedule')],
+      [Markup.button.callback('🔙 بازگشت', 'schedule_message')]
+    ]));
+  } else if (step === 'delay_message_text') {
+    ctx.session.delayMessageText = text;
+    ctx.session.step = 'delay_message_minutes';
+    ctx.reply('تعداد دقیقه تأخیر را وارد کنید (مثلاً 10):', Markup.inlineKeyboard([
+      [Markup.button.callback('🔙 بازگشت', 'delay_message')]
+    ]));
+  } else if (step === 'delay_message_minutes') {
+    const minutes = parseInt(text);
+    if (isNaN(minutes) || minutes <= 0) {
+      return ctx.reply('لطفاً یک عدد مثبت وارد کنید.');
+    }
+    ctx.session.delayMinutes = minutes;
+    ctx.session.step = 'delay_message_buttons';
+    ctx.reply('آیا می‌خواهید دکمه اضافه کنید؟', Markup.inlineKeyboard([
+      [Markup.button.callback('✅ بله', 'delay_add_buttons')],
+      [Markup.button.callback('❌ خیر', 'send_delay_message_now')]
+    ]));
+  } else if (step === 'poll_question') {
+    ctx.session.pollQuestion = text;
+    ctx.session.pollOptions = [];
+    ctx.session.step = 'poll_options';
+    ctx.reply('گزینه اول را وارد کنید:', Markup.inlineKeyboard([
+      [Markup.button.callback('🔙 بازگشت', 'create_poll')]
+    ]));
+  } else if (step === 'poll_options') {
+    if (!ctx.session.pollOptions) ctx.session.pollOptions = [];
+    ctx.session.pollOptions.push(text);
+    if (ctx.session.pollOptions.length >= 10) {
       const optionsPreview = ctx.session.pollOptions.map((opt, i) => `${i+1}. ${opt}`).join('\n');
-
-      ctx.reply(`گزینه اضافه شد. گزینه‌های فعلی:\n${optionsPreview}\n\nگزینه بعدی را وارد کنید یا دکمه پایان را بزنید:`, {
-        reply_markup: Markup.inlineKeyboard([
-          [Markup.button.callback('✅ پایان و ایجاد نظرسنجی', 'create_poll_now')]
-        ])
+      ctx.reply(`حداکثر گزینه‌ها اضافه شد:\n${optionsPreview}`, Markup.inlineKeyboard([
+        [Markup.button.callback('✅ ایجاد نظرسنجی', 'create_poll_now')]
+      ]));
+    } else {
+      const optionsPreview = ctx.session.pollOptions.map((opt, i) => `${i+1}. ${opt}`).join('\n');
+      ctx.reply(`گزینه اضافه شد:\n${optionsPreview}\nگزینه بعدی را وارد کنید یا دکمه پایان را بزنید:`, Markup.inlineKeyboard([
+        [Markup.button.callback('✅ پایان و ایجاد نظرسنجی', 'create_poll_now')]
+      ]));
+    }
+  } else if (step === 'set_welcome_text') {
+    const groupId = ctx.session.welcomeGroupId;
+    botData.welcomeMessages[groupId] = text;
+    saveData();
+    ctx.reply('✅ پیام خوشامدگویی تنظیم شد.', Markup.inlineKeyboard([
+      [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
+    ]));
+    ctx.session.step = null;
+  } else if (step === 'edit_message_text') {
+    ctx.session.newMessageText = text;
+    const channelId = ctx.session.editChannelId;
+    const messageId = ctx.session.editMessageId;
+    bot.telegram.editMessageText(channelId, messageId, null, text, { parse_mode: 'HTML' })
+      .then(() => {
+        ctx.reply('✅ پیام ویرایش شد.', Markup.inlineKeyboard([
+          [Markup.button.callback('🔙 بازگشت', 'manage_messages')]
+        ]));
+      })
+      .catch(err => {
+        ctx.reply(`❌ خطا در ویرایش پیام: ${err.message}`, Markup.inlineKeyboard([
+          [Markup.button.callback('🔙 بازگشت', 'manage_messages')]
+        ]));
       });
-      break;
-
-    case 'set_welcome_text':
-      const groupId = ctx.session.welcomeGroupId;
-      botData.welcomeMessages[groupId] = text;
-      saveData();
-
-      ctx.reply('✅ پیام خوشامدگویی با موفقیت تنظیم شد.', {
-        reply_markup: Markup.inlineKeyboard([
-          [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
-        ])
-      });
-      break;
-
-    case 'edit_message_text':
-      ctx.session.newMessageText = text;
-
-      try {
-        await bot.telegram.editMessageText(
-          ctx.session.editChannelId,
-          ctx.session.editMessageId,
-          null,
-          text,
-          { parse_mode: 'HTML' }
-        );
-
-        ctx.reply('✅ پیام با موفقیت ویرایش شد.', {
-          reply_markup: Markup.inlineKeyboard([
-            [Markup.button.callback('🔙 بازگشت', 'manage_messages')]
-          ])
-        });
-      } catch (error) {
-        ctx.reply(`❌ خطا در ویرایش پیام: ${error.message}`, {
-          reply_markup: Markup.inlineKeyboard([
-            [Markup.button.callback('🔙 بازگشت', 'manage_messages')]
-          ])
-        });
-      }
-      break;
-
-    default:
-      // No active session or unknown step
-      if (isAdmin(ctx)) {
-        ctx.reply('برای استفاده از امکانات ربات، از دکمه‌های زیر استفاده کنید:', {
-          reply_markup: Markup.inlineKeyboard([
-            [Markup.button.callback('🖥 نمایش پنل مدیریت', 'back_to_main')]
-          ])
-        });
-      }
+    ctx.session.step = null;
   }
 });
 
-// Action handlers for various operations
-bot.action('send_message_now', adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
+// ========================
+// ارسال پیام با دکمه‌های شیشه‌ای
+// ========================
+bot.action('send_message', (ctx) => {
+  ctx.answerCbQuery();
+  if (botData.channels.length === 0) {
+    return ctx.reply('ابتدا کانالی اضافه کنید.', Markup.inlineKeyboard([
+      [Markup.button.callback('➕ افزودن کانال', 'add_channel')],
+      [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
+    ]));
+  }
+  ctx.session.step = 'send_message_select_channel';
+  const buttons = botData.channels.map(ch => [Markup.button.callback(ch.title, `select_channel:${ch.id}`)]);
+  buttons.push([Markup.button.callback('🔙 بازگشت', 'back_to_main')]);
+  ctx.reply('کانال مورد نظر را انتخاب کنید:', Markup.inlineKeyboard(buttons));
+});
 
+bot.action(/select_channel:(.+)/, (ctx) => {
+  ctx.answerCbQuery();
+  ctx.session.selectedChannel = ctx.match[1];
+  ctx.session.step = 'send_message_text';
+  ctx.reply('متن پیام را وارد کنید:', Markup.inlineKeyboard([
+    [Markup.button.callback('🔙 بازگشت', 'send_message')]
+  ]));
+});
+
+bot.action('add_buttons', (ctx) => {
+  ctx.answerCbQuery();
+  ctx.session.step = 'add_button_text';
+  ctx.reply('متن دکمه را وارد کنید:', Markup.inlineKeyboard([
+    [Markup.button.callback('پایان افزودن دکمه', 'send_message_now')],
+    [Markup.button.callback('🔙 بازگشت', 'send_message')]
+  ]));
+});
+
+bot.action('send_message_now', (ctx) => {
+  ctx.answerCbQuery();
   const channelId = ctx.session.selectedChannel;
   const messageText = ctx.session.messageText;
   const buttons = ctx.session.messageButtons || [];
-
-  // Create inline keyboard if there are buttons
-  const inlineKeyboard = [];
-
+  // ساخت آرایه‌ای از دکمه‌های URL (برای کانال‌ها)
+  let inlineKeyboard = [];
   if (buttons.length > 0) {
-    // Group buttons by 2
     for (let i = 0; i < buttons.length; i += 2) {
-      const row = [];
+      let row = [];
       row.push(Markup.button.url(buttons[i].text, buttons[i].url));
-
       if (buttons[i + 1]) {
         row.push(Markup.button.url(buttons[i + 1].text, buttons[i + 1].url));
       }
-
       inlineKeyboard.push(row);
     }
   }
-
-  try {
-    await bot.telegram.sendMessage(channelId, messageText, {
-      parse_mode: 'HTML',
-      reply_markup: inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined
-    });
-
-    await ctx.reply('✅ پیام با موفقیت ارسال شد.', {
-      reply_markup: Markup.inlineKeyboard([
-        [Markup.button.callback('🔙 بازگشت به منوی اصلی', 'back_to_main')]
-      ])
-    });
-  } catch (error) {
-    await ctx.reply(`❌ خطا در ارسال پیام: ${error.message}`, {
-      reply_markup: Markup.inlineKeyboard([
+  bot.telegram.sendMessage(channelId, messageText, {
+    parse_mode: 'HTML',
+    reply_markup: inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined
+  })
+    .then(() => {
+      ctx.reply('✅ پیام ارسال شد.', Markup.inlineKeyboard([
         [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
-      ])
+      ]));
+      ctx.session = {};
+    })
+    .catch(err => {
+      ctx.reply(`❌ خطا در ارسال پیام: ${err.message}`, Markup.inlineKeyboard([
+        [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
+      ]));
     });
+});
+
+// ========================
+// ارسال پیام زمانبندی‌شده
+// ========================
+bot.action('schedule_message', (ctx) => {
+  ctx.answerCbQuery();
+  if (botData.channels.length === 0) {
+    return ctx.reply('ابتدا کانالی اضافه کنید.', Markup.inlineKeyboard([
+      [Markup.button.callback('➕ افزودن کانال', 'add_channel')],
+      [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
+    ]));
   }
+  ctx.session.step = 'schedule_select_channel';
+  const buttons = botData.channels.map(ch => [Markup.button.callback(ch.title, `schedule_channel:${ch.id}`)]);
+  buttons.push([Markup.button.callback('🔙 بازگشت', 'back_to_main')]);
+  ctx.reply('کانال مورد نظر برای زمانبندی را انتخاب کنید:', Markup.inlineKeyboard(buttons));
 });
 
-// Schedule message action handlers
-bot.action(/schedule_channel:(.+)/, adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-  const channelId = ctx.match[1];
-  ctx.session.selectedScheduleChannel = channelId;
+bot.action(/schedule_channel:(.+)/, (ctx) => {
+  ctx.answerCbQuery();
+  ctx.session.selectedScheduleChannel = ctx.match[1];
   ctx.session.step = 'schedule_message_text';
-
-  ctx.reply('متن پیام زمانبندی شده را وارد کنید:', {
-    reply_markup: Markup.inlineKeyboard([
-      [Markup.button.callback('🔙 بازگشت', 'schedule_message')]
-    ])
-  });
+  ctx.reply('متن پیام زمانبندی را وارد کنید:', Markup.inlineKeyboard([
+    [Markup.button.callback('🔙 بازگشت', 'schedule_message')]
+  ]));
 });
 
-bot.action(/schedule_day:(.+)/, adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
+bot.action(/schedule_day:(.+)/, (ctx) => {
+  ctx.answerCbQuery();
   const day = ctx.match[1];
-
   ctx.session.scheduleDays = ctx.session.scheduleDays || [];
-
   if (day === 'all') {
     ctx.session.scheduleDays = ['0', '1', '2', '3', '4', '5', '6'];
-    ctx.reply('هر روز هفته انتخاب شد');
+    ctx.reply('تمام روزها انتخاب شد.');
   } else {
     if (!ctx.session.scheduleDays.includes(day)) {
       ctx.session.scheduleDays.push(day);
-
-      const dayNames = {
-        '0': 'یکشنبه',
-        '1': 'دوشنبه',
-        '2': 'سه‌شنبه',
-        '3': 'چهارشنبه',
-        '4': 'پنجشنبه',
-        '5': 'جمعه',
-        '6': 'شنبه'
-      };
-
-      const selectedDays = ctx.session.scheduleDays.map(d => dayNames[d]).join('، ');
+      const dayNames = { '0': 'یکشنبه', '1': 'دوشنبه', '2': 'سه‌شنبه', '3': 'چهارشنبه', '4': 'پنجشنبه', '5': 'جمعه', '6': 'شنبه' };
+      const selectedDays = ctx.session.scheduleDays.map(d => dayNames[d]).join(', ');
       ctx.reply(`روزهای انتخاب شده: ${selectedDays}`);
     }
   }
 });
 
-bot.action('save_schedule', adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-
+bot.action('save_schedule', (ctx) => {
+  ctx.answerCbQuery();
   if (!ctx.session.scheduleDays || ctx.session.scheduleDays.length === 0) {
-    return ctx.reply('لطفا حداقل یک روز را انتخاب کنید');
+    return ctx.reply('لطفاً حداقل یک روز انتخاب کنید.');
   }
-
   const channelId = ctx.session.selectedScheduleChannel;
   const messageText = ctx.session.scheduleMessageText;
   const time = ctx.session.scheduleTime;
   const days = ctx.session.scheduleDays;
-
-  const [hours, minutes] = time.split(':').map(Number);
-
-  // Create cron expression
+  const [hours, minutes] = ctx.session.scheduleTime.split(':').map(Number);
+  
   let cronExpression;
   if (days.length === 7) {
-    cronExpression = `${minutes} ${hours} * * *`; // Every day
+    cronExpression = `${minutes} ${hours} * * *`;
   } else {
-    cronExpression = `${minutes} ${hours} * * ${days.join(',')}`; // Specific days
+    cronExpression = `${minutes} ${hours} * * ${days.join(',')}`;
   }
-
+  
   const scheduleId = Date.now().toString();
-
   botData.scheduledMessages.push({
     id: scheduleId,
     channelId,
@@ -699,58 +414,67 @@ bot.action('save_schedule', adminMiddleware, async (ctx) => {
     days,
     time
   });
-
   saveData();
   setupScheduledTasks();
-
-  ctx.reply('✅ پیام زمانبندی شده با موفقیت ذخیره شد.', {
-    reply_markup: Markup.inlineKeyboard([
-      [Markup.button.callback('🔙 بازگشت به منوی اصلی', 'back_to_main')]
-    ])
-  });
+  ctx.reply('✅ پیام زمانبندی ذخیره شد.', Markup.inlineKeyboard([
+    [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
+  ]));
+  ctx.session = {};
 });
 
-// Delayed message action handlers
-bot.action(/delay_channel:(.+)/, adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-  const channelId = ctx.match[1];
-  ctx.session.selectedDelayChannel = channelId;
+// ========================
+// ارسال پیام با تأخیر
+// ========================
+bot.action('delay_message', (ctx) => {
+  ctx.answerCbQuery();
+  if (botData.channels.length === 0) {
+    return ctx.reply('ابتدا کانالی اضافه کنید.', Markup.inlineKeyboard([
+      [Markup.button.callback('➕ افزودن کانال', 'add_channel')],
+      [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
+    ]));
+  }
+  ctx.session.step = 'delay_select_channel';
+  const buttons = botData.channels.map(ch => [Markup.button.callback(ch.title, `delay_channel:${ch.id}`)]);
+  buttons.push([Markup.button.callback('🔙 بازگشت', 'back_to_main')]);
+  ctx.reply('کانال مورد نظر برای ارسال پیام با تأخیر را انتخاب کنید:', Markup.inlineKeyboard(buttons));
+});
+
+bot.action(/delay_channel:(.+)/, (ctx) => {
+  ctx.answerCbQuery();
+  ctx.session.selectedDelayChannel = ctx.match[1];
   ctx.session.step = 'delay_message_text';
-
-  ctx.reply('متن پیام با تاخیر را وارد کنید:', {
-    reply_markup: Markup.inlineKeyboard([
-      [Markup.button.callback('🔙 بازگشت', 'delay_message')]
-    ])
-  });
+  ctx.reply('متن پیام با تأخیر را وارد کنید:', Markup.inlineKeyboard([
+    [Markup.button.callback('🔙 بازگشت', 'delay_message')]
+  ]));
 });
 
-bot.action('send_delay_message_now', adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
+bot.action('delay_add_buttons', (ctx) => {
+  ctx.answerCbQuery();
+  ctx.session.step = 'add_button_text'; // استفاده از همان فرایند افزودن دکمه
+  ctx.reply('متن دکمه را وارد کنید:', Markup.inlineKeyboard([
+    [Markup.button.callback('پایان افزودن دکمه', 'send_delay_message_now')],
+    [Markup.button.callback('🔙 بازگشت', 'delay_message')]
+  ]));
+});
 
+bot.action('send_delay_message_now', (ctx) => {
+  ctx.answerCbQuery();
   const channelId = ctx.session.selectedDelayChannel;
   const messageText = ctx.session.delayMessageText;
   const delayMinutes = ctx.session.delayMinutes;
   const buttons = ctx.session.delayMessageButtons || [];
-
-  // Create inline keyboard if there are buttons
-  const inlineKeyboard = [];
-
+  let inlineKeyboard = [];
   if (buttons.length > 0) {
-    // Group buttons by 2
     for (let i = 0; i < buttons.length; i += 2) {
-      const row = [];
+      let row = [];
       row.push(Markup.button.url(buttons[i].text, buttons[i].url));
-
       if (buttons[i + 1]) {
         row.push(Markup.button.url(buttons[i + 1].text, buttons[i + 1].url));
       }
-
       inlineKeyboard.push(row);
     }
   }
-
   const delayedMessageId = Date.now().toString();
-
   botData.delayedMessages.push({
     id: delayedMessageId,
     channelId,
@@ -758,341 +482,315 @@ bot.action('send_delay_message_now', adminMiddleware, async (ctx) => {
     buttons,
     sendAt: Date.now() + (delayMinutes * 60 * 1000)
   });
-
   saveData();
-
-  ctx.reply(`✅ پیام با تاخیر ${delayMinutes} دقیقه زمانبندی شد.`, {
-    reply_markup: Markup.inlineKeyboard([
-      [Markup.button.callback('🔙 بازگشت به منوی اصلی', 'back_to_main')]
-    ])
-  });
-
-  // Set timeout to send the message
+  ctx.reply(`✅ پیام با تأخیر ${delayMinutes} دقیقه برنامه‌ریزی شد.`, Markup.inlineKeyboard([
+    [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
+  ]));
+  // زمان‌بندی ارسال پیام با استفاده از setTimeout
   setTimeout(async () => {
     try {
+      let inlineKeyboardDelayed = [];
+      if (buttons.length > 0) {
+        for (let i = 0; i < buttons.length; i += 2) {
+          let row = [];
+          row.push(Markup.button.url(buttons[i].text, buttons[i].url));
+          if (buttons[i + 1]) {
+            row.push(Markup.button.url(buttons[i + 1].text, buttons[i + 1].url));
+          }
+          inlineKeyboardDelayed.push(row);
+        }
+      }
       await bot.telegram.sendMessage(channelId, messageText, {
         parse_mode: 'HTML',
-        reply_markup: inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined
+        reply_markup: inlineKeyboardDelayed.length > 0 ? { inline_keyboard: inlineKeyboardDelayed } : undefined
       });
-
-      // Remove from delayedMessages after sending
       botData.delayedMessages = botData.delayedMessages.filter(msg => msg.id !== delayedMessageId);
       saveData();
-
     } catch (error) {
-      console.error('Error sending delayed message:', error);
+      console.error('خطا در ارسال پیام با تأخیر:', error);
     }
   }, delayMinutes * 60 * 1000);
 });
 
-// Poll action handlers
-bot.action(/poll_channel:(.+)/, adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-  const channelId = ctx.match[1];
-  ctx.session.selectedPollChannel = channelId;
-  ctx.session.step = 'poll_question';
-
-  ctx.reply('سوال نظرسنجی را وارد کنید:', {
-    reply_markup: Markup.inlineKeyboard([
-      [Markup.button.callback('🔙 بازگشت', 'create_poll')]
-    ])
-  });
+// ========================
+// ایجاد نظرسنجی
+// ========================
+bot.action('create_poll', (ctx) => {
+  ctx.answerCbQuery();
+  if (botData.channels.length === 0) {
+    return ctx.reply('ابتدا کانالی اضافه کنید.', Markup.inlineKeyboard([
+      [Markup.button.callback('➕ افزودن کانال', 'add_channel')],
+      [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
+    ]));
+  }
+  ctx.session.step = 'poll_select_channel';
+  const buttons = botData.channels.map(ch => [Markup.button.callback(ch.title, `poll_channel:${ch.id}`)]);
+  buttons.push([Markup.button.callback('🔙 بازگشت', 'back_to_main')]);
+  ctx.reply('کانال مورد نظر برای نظرسنجی را انتخاب کنید:', Markup.inlineKeyboard(buttons));
 });
 
-bot.action('create_poll_now', adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
+bot.action(/poll_channel:(.+)/, (ctx) => {
+  ctx.answerCbQuery();
+  ctx.session.selectedPollChannel = ctx.match[1];
+  ctx.session.step = 'poll_question';
+  ctx.reply('سوال نظرسنجی را وارد کنید:', Markup.inlineKeyboard([
+    [Markup.button.callback('🔙 بازگشت', 'create_poll')]
+  ]));
+});
 
+bot.action('create_poll_now', (ctx) => {
+  ctx.answerCbQuery();
   if (!ctx.session.pollOptions || ctx.session.pollOptions.length < 2) {
-    return ctx.reply('نظرسنجی باید حداقل دو گزینه داشته باشد');
+    return ctx.reply('نظرسنجی باید حداقل دو گزینه داشته باشد.');
   }
-
   const channelId = ctx.session.selectedPollChannel;
   const question = ctx.session.pollQuestion;
   const options = ctx.session.pollOptions;
-
-  try {
-    await bot.telegram.sendPoll(channelId, question, options, {
-      is_anonymous: true
-    });
-
-    ctx.reply('✅ نظرسنجی با موفقیت ایجاد شد.', {
-      reply_markup: Markup.inlineKeyboard([
-        [Markup.button.callback('🔙 بازگشت به منوی اصلی', 'back_to_main')]
-      ])
-    });
-  } catch (error) {
-    ctx.reply(`❌ خطا در ایجاد نظرسنجی: ${error.message}`, {
-      reply_markup: Markup.inlineKeyboard([
+  bot.telegram.sendPoll(channelId, question, options, { is_anonymous: true })
+    .then(() => {
+      ctx.reply('✅ نظرسنجی ایجاد شد.', Markup.inlineKeyboard([
         [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
-      ])
+      ]));
+      ctx.session = {};
+    })
+    .catch(err => {
+      ctx.reply(`❌ خطا: ${err.message}`, Markup.inlineKeyboard([
+        [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
+      ]));
     });
-  }
 });
 
-// Welcome message action handlers
-bot.action(/set_welcome_group:(.+)/, adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-  const groupId = ctx.match[1];
-  ctx.session.welcomeGroupId = groupId;
+// ========================
+// تنظیم پیام خوشامدگویی
+// ========================
+bot.action('set_welcome', (ctx) => {
+  ctx.answerCbQuery();
+  // فیلتر کردن گروه‌ها از میان کانال‌ها
+  const groups = botData.channels.filter(ch => ch.type === 'group');
+  if (groups.length === 0) {
+    return ctx.reply('ابتدا یک گروه اضافه کنید.', Markup.inlineKeyboard([
+      [Markup.button.callback('➕ افزودن گروه', 'add_channel')],
+      [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
+    ]));
+  }
+  const buttons = groups.map(gr => [Markup.button.callback(gr.title, `set_welcome_group:${gr.id}`)]);
+  buttons.push([Markup.button.callback('🔙 بازگشت', 'back_to_main')]);
+  ctx.reply('گروه مورد نظر برای تنظیم پیام خوشامدگویی را انتخاب کنید:', Markup.inlineKeyboard(buttons));
+});
+
+bot.action(/set_welcome_group:(.+)/, (ctx) => {
+  ctx.answerCbQuery();
+  ctx.session.welcomeGroupId = ctx.match[1];
   ctx.session.step = 'set_welcome_text';
-
-  const currentWelcome = botData.welcomeMessages[groupId] || 'پیام خوشامدگویی تنظیم نشده است';
-
-  ctx.reply(`پیام خوشامدگویی فعلی:\n${currentWelcome}\n\nپیام جدید را وارد کنید (می‌توانید از {user} برای نمایش نام کاربر استفاده کنید):`, {
-    reply_markup: Markup.inlineKeyboard([
-      [Markup.button.callback('🔙 بازگشت', 'set_welcome')]
-    ])
-  });
+  const currentWelcome = botData.welcomeMessages[ctx.match[1]] || 'پیام خوشامدگویی تنظیم نشده است';
+  ctx.reply(`پیام خوشامدگویی فعلی:\n${currentWelcome}\n\nپیام جدید را وارد کنید (می‌توانید از {user} استفاده کنید):`, Markup.inlineKeyboard([
+    [Markup.button.callback('🔙 بازگشت', 'set_welcome')]
+  ]));
 });
 
-// Get members action handlers
-bot.action(/get_members_channel:(.+)/, adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
+// ========================
+// دریافت اعضای کانال (ادمین‌ها)
+// ========================
+bot.action('get_members', (ctx) => {
+  ctx.answerCbQuery();
+  if (botData.channels.length === 0) {
+    return ctx.reply('ابتدا کانالی اضافه کنید.', Markup.inlineKeyboard([
+      [Markup.button.callback('➕ افزودن کانال', 'add_channel')],
+      [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
+    ]));
+  }
+  const buttons = botData.channels.map(ch => [Markup.button.callback(ch.title, `get_members_channel:${ch.id}`)]);
+  buttons.push([Markup.button.callback('🔙 بازگشت', 'back_to_main')]);
+  ctx.reply('کانال مورد نظر را انتخاب کنید:', Markup.inlineKeyboard(buttons));
+});
+
+bot.action(/get_members_channel:(.+)/, (ctx) => {
+  ctx.answerCbQuery();
   const channelId = ctx.match[1];
-
-  try {
-    ctx.reply('در حال دریافت اطلاعات اعضا...');
-
-    // Note: This requires admin privileges in the channel
-    // And may not work for larger channels due to API limitations
-    const chatMembers = await bot.telegram.getChatAdministrators(channelId);
-
-    if (chatMembers && chatMembers.length > 0) {
-      const membersInfo = chatMembers.map(member => 
-        `${member.user.first_name} ${member.user.last_name || ''} ${member.user.username ? '@' + member.user.username : ''}`
-      ).join('\n');
-
-      ctx.reply(`ادمین‌های کانال/گروه:\n${membersInfo}`, {
-        reply_markup: Markup.inlineKeyboard([
+  ctx.reply('در حال دریافت اطلاعات اعضا...');
+  bot.telegram.getChatAdministrators(channelId)
+    .then(admins => {
+      if (admins && admins.length > 0) {
+        const members = admins.map(adm => {
+          const name = adm.user.first_name + (adm.user.last_name ? ' ' + adm.user.last_name : '');
+          const username = adm.user.username ? '(@' + adm.user.username + ')' : '';
+          return `${name} ${username}`;
+        }).join('\n');
+        ctx.reply(`ادمین‌های کانال:\n${members}`, Markup.inlineKeyboard([
           [Markup.button.callback('🔙 بازگشت', 'get_members')]
-        ])
-      });
-    } else {
-      ctx.reply('اطلاعات اعضا یافت نشد یا دسترسی کافی ندارید.', {
-        reply_markup: Markup.inlineKeyboard([
+        ]));
+      } else {
+        ctx.reply('اطلاعاتی یافت نشد یا دسترسی کافی ندارید.', Markup.inlineKeyboard([
           [Markup.button.callback('🔙 بازگشت', 'get_members')]
-        ])
-      });
-    }
-  } catch (error) {
-    ctx.reply(`❌ خطا در دریافت اطلاعات اعضا: ${error.message}`, {
-      reply_markup: Markup.inlineKeyboard([
+        ]));
+      }
+    })
+    .catch(err => {
+      ctx.reply(`❌ خطا: ${err.message}`, Markup.inlineKeyboard([
         [Markup.button.callback('🔙 بازگشت', 'get_members')]
-      ])
+      ]));
     });
-  }
 });
 
-// Manage messages action handlers
-bot.action(/manage_messages_channel:(.+)/, adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-  const channelId = ctx.match[1];
-
-  ctx.reply('برای مدیریت پیام، شناسه (ID) پیام را وارد کنید یا پیام را فوروارد کنید.', {
-    reply_markup: Markup.inlineKeyboard([
-      [Markup.button.callback('🔙 بازگشت', 'manage_messages')]
-    ])
-  });
-
+// ========================
+// مدیریت پیام‌ها (ویرایش / حذف)
+// ========================
+bot.action('manage_messages', (ctx) => {
+  ctx.answerCbQuery();
+  if (botData.channels.length === 0) {
+    return ctx.reply('ابتدا کانالی اضافه کنید.', Markup.inlineKeyboard([
+      [Markup.button.callback('➕ افزودن کانال', 'add_channel')],
+      [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
+    ]));
+  }
   ctx.session.step = 'manage_message_id';
-  ctx.session.manageMessageChannelId = channelId;
+  const buttons = botData.channels.map(ch => [Markup.button.callback(ch.title, `manage_messages_channel:${ch.id}`)]);
+  buttons.push([Markup.button.callback('🔙 بازگشت', 'back_to_main')]);
+  ctx.reply('کانال مورد نظر را انتخاب کنید:', Markup.inlineKeyboard(buttons));
 });
 
-// Channel info action handlers
-bot.action(/channel_info:(.+)/, adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-  const channelId = ctx.match[1];
-
-  const channel = botData.channels.find(ch => ch.id === channelId);
-
-  if (!channel) {
-    return ctx.reply('کانال یافت نشد!', {
-      reply_markup: Markup.inlineKeyboard([
-        [Markup.button.callback('🔙 بازگشت', 'manage_channels')]
-      ])
-    });
-  }
-
-  ctx.reply(`اطلاعات کانال:\nشناسه: ${channel.id}\nنام: ${channel.title}\nنوع: ${channel.type === 'channel' ? 'کانال' : 'گروه'}`, {
-    reply_markup: Markup.inlineKeyboard([
-      [Markup.button.callback('❌ حذف کانال', `delete_channel:${channelId}`)],
-      [Markup.button.callback('🔙 بازگشت', 'manage_channels')]
-    ])
-  });
+bot.action(/manage_messages_channel:(.+)/, (ctx) => {
+  ctx.answerCbQuery();
+  ctx.session.manageMessageChannelId = ctx.match[1];
+  ctx.session.step = 'manage_message_id';
+  ctx.reply('لطفاً پیام را فوروارد کنید یا شناسه آن را وارد کنید:', Markup.inlineKeyboard([
+    [Markup.button.callback('🔙 بازگشت', 'manage_messages')]
+  ]));
 });
 
-bot.action(/delete_channel:(.+)/, adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-  const channelId = ctx.match[1];
-
-  botData.channels = botData.channels.filter(ch => ch.id !== channelId);
-  saveData();
-
-  ctx.reply('✅ کانال با موفقیت حذف شد.', {
-    reply_markup: Markup.inlineKeyboard([
-      [Markup.button.callback('🔙 بازگشت', 'manage_channels')]
-    ])
-  });
-});
-
-// Handle forwarded messages for message management
+// دریافت پیام فوروارد شده جهت مدیریت
 bot.on('message', (ctx) => {
   if (!isAdmin(ctx)) return;
-
-  if (ctx.session && ctx.session.step === 'manage_message_id' && ctx.message.forward_from_message_id) {
+  if (ctx.session.step === 'manage_message_id' && ctx.message.forward_from_message_id) {
     const messageId = ctx.message.forward_from_message_id;
     const channelId = ctx.session.manageMessageChannelId;
-
-    ctx.reply(`پیام با شناسه ${messageId} انتخاب شد. عملیات مورد نظر را انتخاب کنید:`, {
-      reply_markup: Markup.inlineKeyboard([
-        [Markup.button.callback('✏️ ویرایش متن', `edit_message:${channelId}:${messageId}`)],
-        [Markup.button.callback('🗑 حذف پیام', `delete_message:${channelId}:${messageId}`)],
-        [Markup.button.callback('🔙 بازگشت', 'manage_messages')]
-      ])
-    });
-  }
-});
-
-bot.action(/edit_message:(.+):(.+)/, adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
-  const channelId = ctx.match[1];
-  const messageId = ctx.match[2];
-
-  ctx.session.editChannelId = channelId;
-  ctx.session.editMessageId = messageId;
-  ctx.session.step = 'edit_message_text';
-
-  ctx.reply('متن جدید پیام را وارد کنید:', {
-    reply_markup: Markup.inlineKeyboard([
+    ctx.reply(`پیام انتخاب شده (ID: ${messageId}). انتخاب کنید:`, Markup.inlineKeyboard([
+      [Markup.button.callback('✏️ ویرایش', `edit_message:${channelId}:${messageId}`)],
+      [Markup.button.callback('🗑 حذف', `delete_message:${channelId}:${messageId}`)],
       [Markup.button.callback('🔙 بازگشت', 'manage_messages')]
-    ])
-  });
+    ]));
+  }
 });
 
-bot.action(/delete_message:(.+):(.+)/, adminMiddleware, async (ctx) => {
-  await ctx.answerCbQuery();
+bot.action(/edit_message:(.+):(.+)/, (ctx) => {
+  ctx.answerCbQuery();
+  ctx.session.editChannelId = ctx.match[1];
+  ctx.session.editMessageId = ctx.match[2];
+  ctx.session.step = 'edit_message_text';
+  ctx.reply('متن جدید را وارد کنید:', Markup.inlineKeyboard([
+    [Markup.button.callback('🔙 بازگشت', 'manage_messages')]
+  ]));
+});
+
+bot.action(/delete_message:(.+):(.+)/, (ctx) => {
+  ctx.answerCbQuery();
   const channelId = ctx.match[1];
   const messageId = ctx.match[2];
-
-  try {
-    await bot.telegram.deleteMessage(channelId, messageId);
-    ctx.reply('✅ پیام با موفقیت حذف شد.', {
-      reply_markup: Markup.inlineKeyboard([
+  bot.telegram.deleteMessage(channelId, messageId)
+    .then(() => {
+      ctx.reply('✅ پیام حذف شد.', Markup.inlineKeyboard([
         [Markup.button.callback('🔙 بازگشت', 'manage_messages')]
-      ])
-    });
-  } catch (error) {
-    ctx.reply(`❌ خطا در حذف پیام: ${error.message}`, {
-      reply_markup: Markup.inlineKeyboard([
+      ]));
+    })
+    .catch(err => {
+      ctx.reply(`❌ خطا در حذف پیام: ${err.message}`, Markup.inlineKeyboard([
         [Markup.button.callback('🔙 بازگشت', 'manage_messages')]
-      ])
+      ]));
     });
-  }
 });
 
-// Handle new chat members for welcome message
-bot.on('new_chat_members', (ctx) => {
-  const chatId = ctx.chat.id.toString();
-
-  if (botData.welcomeMessages && botData.welcomeMessages[chatId]) {
-    const newMember = ctx.message.new_chat_member;
-    let welcomeMessage = botData.welcomeMessages[chatId];
-
-    // Replace {user} with the user's name
-    welcomeMessage = welcomeMessage.replace('{user}', newMember.first_name);
-
-    ctx.reply(welcomeMessage, { parse_mode: 'HTML' });
-  }
+// ========================
+// دکمه "بازگشت" به منوی اصلی
+// ========================
+bot.action('back_to_main', (ctx) => {
+  ctx.answerCbQuery();
+  showAdminPanel(ctx);
 });
 
-// Set up scheduled tasks
+// ========================
+// زمانبندی ارسال پیام‌ها و پردازش پیام‌های با تأخیر
+// ========================
+
+// راه‌اندازی وظایف زمانبندی‌شده با استفاده از node-cron
 function setupScheduledTasks() {
-  // Clear all scheduled tasks
-  Object.keys(cron.getTasks()).forEach(taskId => {
-    cron.getTasks()[taskId].stop();
-  });
-
-  // Set up new tasks
-  botData.scheduledMessages.forEach(message => {
-    cron.schedule(message.cronExpression, async () => {
+  // متد cron.getTasks در نسخه‌های مختلف ممکن است وجود نداشته باشد؛ در صورت نیاز می‌توانید مدیریت دستی انجام دهید
+  if (cron.getTasks) {
+    Object.values(cron.getTasks()).forEach(task => task.stop && task.stop());
+  }
+  botData.scheduledMessages.forEach(msg => {
+    cron.schedule(msg.cronExpression, async () => {
       try {
-        await bot.telegram.sendMessage(message.channelId, message.messageText, {
-          parse_mode: 'HTML'
-        });
-        console.log(`Scheduled message sent to ${message.channelId}`);
-      } catch (error) {
-        console.error('Error sending scheduled message:', error);
+        await bot.telegram.sendMessage(msg.channelId, msg.messageText, { parse_mode: 'HTML' });
+        console.log(`پیام زمانبندی شده به ${msg.channelId} ارسال شد.`);
+      } catch (err) {
+        console.error('خطا در ارسال پیام زمانبندی شده:', err);
       }
     });
   });
 }
 
-// Process delayed messages on startup
+// پردازش پیام‌های با تأخیر در زمان راه‌اندازی ربات
 function processDelayedMessages() {
   const now = Date.now();
-
-  botData.delayedMessages.forEach(message => {
-    if (message.sendAt > now) {
-      // Set timeout for future messages
-      const delay = message.sendAt - now;
-
+  botData.delayedMessages.forEach(msg => {
+    if (msg.sendAt > now) {
+      const delay = msg.sendAt - now;
       setTimeout(async () => {
         try {
-          const inlineKeyboard = [];
-
-          if (message.buttons && message.buttons.length > 0) {
-            // Group buttons by 2
-            for (let i = 0; i < message.buttons.length; i += 2) {
-              const row = [];
-              row.push(Markup.button.url(message.buttons[i].text, message.buttons[i].url));
-
-              if (message.buttons[i + 1]) {
-                row.push(Markup.button.url(message.buttons[i + 1].text, message.buttons[i + 1].url));
+          let inlineKeyboard = [];
+          if (msg.buttons && msg.buttons.length > 0) {
+            for (let i = 0; i < msg.buttons.length; i += 2) {
+              let row = [];
+              row.push(Markup.button.url(msg.buttons[i].text, msg.buttons[i].url));
+              if (msg.buttons[i + 1]) {
+                row.push(Markup.button.url(msg.buttons[i + 1].text, msg.buttons[i + 1].url));
               }
-
               inlineKeyboard.push(row);
             }
           }
-
-          await bot.telegram.sendMessage(message.channelId, message.messageText, {
+          await bot.telegram.sendMessage(msg.channelId, msg.messageText, {
             parse_mode: 'HTML',
             reply_markup: inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined
           });
-
-          // Remove from delayedMessages after sending
-          botData.delayedMessages = botData.delayedMessages.filter(msg => msg.id !== message.id);
+          botData.delayedMessages = botData.delayedMessages.filter(m => m.id !== msg.id);
           saveData();
-
-        } catch (error) {
-          console.error('Error sending delayed message:', error);
+        } catch (err) {
+          console.error('خطا در ارسال پیام با تأخیر:', err);
         }
       }, delay);
     } else {
-      // Remove expired delayed messages
-      botData.delayedMessages = botData.delayedMessages.filter(msg => msg.id !== message.id);
+      // حذف پیام‌های منقضی شده
+      botData.delayedMessages = botData.delayedMessages.filter(m => m.id !== msg.id);
       saveData();
     }
   });
 }
 
-// Initialize bot
+// ========================
+// پیام خوشامدگویی برای کاربران جدید در گروه
+// ========================
+bot.on('new_chat_members', (ctx) => {
+  const chatId = ctx.chat.id.toString();
+  if (botData.welcomeMessages && botData.welcomeMessages[chatId]) {
+    const newMember = ctx.message.new_chat_member;
+    let welcomeMsg = botData.welcomeMessages[chatId];
+    // جایگزینی {user} با نام کاربر
+    welcomeMsg = welcomeMsg.replace('{user}', newMember.first_name);
+    ctx.reply(welcomeMsg, { parse_mode: 'HTML' });
+  }
+});
+
+// ========================
+// راه‌اندازی و راه‌اندازی مجدد ربات
+// ========================
 function initBot() {
   loadData();
   setupScheduledTasks();
   processDelayedMessages();
-
-  // Set up session middleware
-  bot.use((ctx, next) => {
-    ctx.session = ctx.session || {};
-    return next();
-  });
-
-  // Start bot
   bot.launch()
-    .then(() => console.log('Bot started successfully'))
-    .catch(err => console.error('Error starting bot:', err));
+    .then(() => console.log('ربات با موفقیت راه‌اندازی شد.'))
+    .catch(err => console.error('خطا در راه‌اندازی ربات:', err));
 
-  // Enable graceful stop
   process.once('SIGINT', () => bot.stop('SIGINT'));
   process.once('SIGTERM', () => bot.stop('SIGTERM'));
 }
