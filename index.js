@@ -245,52 +245,47 @@ bot.action('send_message_now', async (ctx) => {
         const channelId = ctx.session.selectedChannel;
         const messageText = ctx.session.messageText;
         const buttons = ctx.session.messageButtons || [];
-        
+
         // ساخت دکمه‌های شیشه‌ای
         const inlineKeyboard = [];
-        
+
         if (buttons.length > 0) {
             // گروه‌بندی دکمه‌ها به صورت دو ستونه
             for (let i = 0; i < buttons.length; i += 2) {
                 const row = [];
-                
-                // اصلاح لینک‌ها قبل از استفاده
-                let url1 = buttons[i].url;
-                // اگر لینک با t.me شروع می‌شود ولی https:// ندارد
-                if (url1.startsWith('t.me/') && !url1.startsWith('https://t.me/')) {
-                    url1 = 'https://' + url1;
-                }
-                
-                row.push({ text: buttons[i].text, url: url1 });
-                
+
+                // استفاده از لینک اصلی بدون تغییر
+                row.push({ text: buttons[i].text, url: buttons[i].url });
+
                 if (buttons[i + 1]) {
-                    let url2 = buttons[i + 1].url;
-                    if (url2.startsWith('t.me/') && !url2.startsWith('https://t.me/')) {
-                        url2 = 'https://' + url2;
-                    }
-                    row.push({ text: buttons[i + 1].text, url: url2 });
+                    row.push({ text: buttons[i + 1].text, url: buttons[i + 1].url });
                 }
-                
+
                 inlineKeyboard.push(row);
             }
         }
-        
+
         // نمایش دیباگ برای بررسی لینک‌ها
         console.log('Keyboard structure:', JSON.stringify(inlineKeyboard));
-        
+
         // ارسال پیام با دکمه‌های شیشه‌ای
         await bot.telegram.sendMessage(channelId, messageText, {
             parse_mode: 'HTML',
             reply_markup: inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined
         });
-        
+
         ctx.reply('✅ پیام ارسال شد.');
-        ctx.session = {};
+        // فقط سشن مربوط به پیام را پاک می‌کنیم، نه کل سشن
+        delete ctx.session.messageText;
+        delete ctx.session.messageButtons;
+        delete ctx.session.selectedChannel;
+        delete ctx.session.currentButtonText;
+        delete ctx.session.step;
+        
         return showAdminPanel(ctx);
     } catch (error) {
         console.error('خطا در ارسال پیام:', error);
-        return ctx.reply(`❌ خطا: ${error.message} - لطفاً دوباره تلاش کنید یا لینک را بررسی کنید. 
-برای لینک‌های تلگرام از فرمت https://t.me/ استفاده کنید.`);
+        return ctx.reply(`❌ خطا: ${error.message} - لطفاً دوباره تلاش کنید.`);
     }
 });
 
@@ -495,17 +490,10 @@ bot.action('send_delay_message_now', async (ctx) => {
         const messageText = ctx.session.delayMessageText;
         const delayMinutes = ctx.session.delayMinutes;
         const buttons = ctx.session.delayMessageButtons || [];
-        
-        // اصلاح لینک‌های دکمه‌ها قبل از ذخیره
-        const processedButtons = buttons.map(btn => {
-            let url = btn.url;
-            // اصلاح لینک‌های t.me
-            if (url.startsWith('t.me/') && !url.startsWith('https://t.me/')) {
-                url = 'https://' + url;
-            }
-            return { ...btn, url };
-        });
-        
+
+        // استفاده از دکمه‌ها بدون تغییر لینک‌ها
+        const processedButtons = buttons;
+
         // ذخیره پیام در دیتابیس
         const delayedMessageId = Date.now().toString();
         botData.delayedMessages.push({
@@ -516,9 +504,9 @@ bot.action('send_delay_message_now', async (ctx) => {
             sendAt: Date.now() + delayMinutes * 60 * 1000
         });
         saveData();
-        
+
         ctx.reply(`✅ پیام با تأخیر ${delayMinutes} دقیقه برنامه‌ریزی شد.`);
-        
+
         // تنظیم تایمر برای ارسال پیام
         setTimeout(async () => {
             try {
@@ -528,23 +516,23 @@ bot.action('send_delay_message_now', async (ctx) => {
                     for (let i = 0; i < processedButtons.length; i += 2) {
                         const row = [];
                         row.push({ text: processedButtons[i].text, url: processedButtons[i].url });
-                        
+
                         if (processedButtons[i + 1]) {
                             row.push({ text: processedButtons[i + 1].text, url: processedButtons[i + 1].url });
                         }
-                        
+
                         inlineKeyboard.push(row);
                     }
                 }
-                
+
                 console.log('Delay message keyboard:', JSON.stringify(inlineKeyboard));
-                
+
                 // ارسال پیام
                 await bot.telegram.sendMessage(channelId, messageText, {
                     parse_mode: 'HTML',
                     reply_markup: inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined
                 });
-                
+
                 // حذف پیام از لیست پیام‌های تاخیری
                 botData.delayedMessages = botData.delayedMessages.filter(msg => msg.id !== delayedMessageId);
                 saveData();
@@ -552,13 +540,19 @@ bot.action('send_delay_message_now', async (ctx) => {
                 console.error('خطا در ارسال پیام تأخیری:', error);
             }
         }, delayMinutes * 60 * 1000);
+
+        // فقط سشن مربوط به پیام تاخیری را پاک می‌کنیم، نه کل سشن
+        delete ctx.session.delayMessageText;
+        delete ctx.session.delayMessageButtons;
+        delete ctx.session.selectedDelayChannel;
+        delete ctx.session.delayMinutes;
+        delete ctx.session.currentButtonText;
+        delete ctx.session.step;
         
-        ctx.session = {};
         return showAdminPanel(ctx);
     } catch (error) {
         console.error('خطا در تنظیم پیام تأخیری:', error);
-        return ctx.reply(`❌ خطا: ${error.message} - لطفاً دوباره تلاش کنید یا لینک را بررسی کنید.
-برای لینک‌های تلگرام از فرمت https://t.me/ استفاده کنید.`);
+        return ctx.reply(`❌ خطا: ${error.message} - لطفاً دوباره تلاش کنید.`);
     }
 });
 
@@ -942,31 +936,20 @@ bot.on('message', async (ctx) => {
         else if (step === 'add_button_text') {
             ctx.session.currentButtonText = ctx.message.text;
             ctx.session.step = 'add_button_url';
-            return ctx.reply('لینک دکمه را وارد کنید (با https:// یا http:// یا t.me/ یا tg://):');
+            return ctx.reply('لینک دکمه را وارد کنید (هر لینکی می‌توانید وارد کنید):');
         }
 
         // لینک دکمه
         else if (step === 'add_button_url') {
+            // هر لینکی را بدون بررسی قبول می‌کنیم
             const url = ctx.message.text.trim();
-            // پشتیبانی از لینک‌های تلگرام (با t.me یا tg:// شروع می‌شوند)
-            if (!url.startsWith('http://') && !url.startsWith('https://') &&
-                !url.startsWith('t.me/') && !url.startsWith('https://t.me/') &&
-                !url.startsWith('tg://')) {
-                return ctx.reply('لینک باید با http:// یا https:// یا t.me/ یا tg:// شروع شود. لطفاً مجدداً وارد کنید:');
-            }
-
-            // تصحیح لینک‌های t.me بدون https://
-            let finalUrl = url;
-            if (url.startsWith('t.me/') && !url.startsWith('https://t.me/')) {
-                finalUrl = 'https://' + url;
-                console.log(`اصلاح لینک تلگرام: ${url} -> ${finalUrl}`);
-            }
-
+            
+            // ساختار دکمه‌های خالی را ایجاد می‌کنیم اگر وجود نداشته باشند
             if (!ctx.session.messageButtons) ctx.session.messageButtons = [];
             if (!ctx.session.delayMessageButtons) ctx.session.delayMessageButtons = [];
             if (!ctx.session.photoMessageButtons) ctx.session.photoMessageButtons = [];
 
-            const buttonInfo = { text: ctx.session.currentButtonText, url: finalUrl };
+            const buttonInfo = { text: ctx.session.currentButtonText, url: url };
             console.log(`دکمه جدید: ${buttonInfo.text} -> ${buttonInfo.url}`);
 
             if (ctx.session.messageText) {
@@ -1179,21 +1162,21 @@ function setupDelayedMessages() {
                         for (let i = 0; i < msg.buttons.length; i += 2) {
                             const row = [];
                             row.push({ text: msg.buttons[i].text, url: msg.buttons[i].url });
-                            
+
                             if (msg.buttons[i + 1]) {
                                 row.push({ text: msg.buttons[i + 1].text, url: msg.buttons[i + 1].url });
                             }
-                            
+
                             inlineKeyboard.push(row);
                         }
                     }
-                    
+
                     // ارسال پیام
                     await bot.telegram.sendMessage(msg.channelId, msg.messageText, {
                         parse_mode: 'HTML',
                         reply_markup: inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined
                     });
-                    
+
                     // حذف پیام از لیست
                     botData.delayedMessages = botData.delayedMessages.filter(m => m.id !== msg.id);
                     saveData();
@@ -1213,21 +1196,21 @@ function setupDelayedMessages() {
                         for (let i = 0; i < msg.buttons.length; i += 2) {
                             const row = [];
                             row.push({ text: msg.buttons[i].text, url: msg.buttons[i].url });
-                            
+
                             if (msg.buttons[i + 1]) {
                                 row.push({ text: msg.buttons[i + 1].text, url: msg.buttons[i + 1].url });
                             }
-                            
+
                             inlineKeyboard.push(row);
                         }
                     }
-                    
+
                     // ارسال پیام
                     await bot.telegram.sendMessage(msg.channelId, msg.messageText, {
                         parse_mode: 'HTML',
                         reply_markup: inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined
                     });
-                    
+
                     // حذف پیام از لیست
                     botData.delayedMessages = botData.delayedMessages.filter(m => m.id !== msg.id);
                     saveData();
