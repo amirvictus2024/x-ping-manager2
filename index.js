@@ -289,6 +289,72 @@ bot.action('send_message_now', async (ctx) => {
     }
 });
 
+// ارسال عکس با دکمه
+bot.action('photo_add_buttons', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        ctx.session.step = 'add_button_text';
+        return ctx.reply('متن دکمه را وارد کنید:');
+    } catch (error) {
+        console.error('خطا در افزودن دکمه به عکس:', error);
+        return ctx.reply(`خطا: ${error.message}`);
+    }
+});
+
+bot.action('send_photo_now', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const channelId = ctx.session.selectedChannel;
+        const fileId = ctx.session.photoFileId;
+        const caption = ctx.session.photoCaption;
+        const buttons = ctx.session.photoMessageButtons || [];
+
+        // ساخت دکمه‌های شیشه‌ای
+        const inlineKeyboard = [];
+
+        if (buttons.length > 0) {
+            // گروه‌بندی دکمه‌ها به صورت دو ستونه
+            for (let i = 0; i < buttons.length; i += 2) {
+                const row = [];
+
+                // استفاده از لینک اصلی بدون تغییر
+                row.push({ text: buttons[i].text, url: buttons[i].url });
+
+                if (buttons[i + 1]) {
+                    row.push({ text: buttons[i + 1].text, url: buttons[i + 1].url });
+                }
+
+                inlineKeyboard.push(row);
+            }
+        }
+
+        // نمایش دیباگ برای بررسی لینک‌ها
+        console.log('Photo keyboard structure:', JSON.stringify(inlineKeyboard));
+
+        // ارسال عکس با دکمه‌های شیشه‌ای
+        await bot.telegram.sendPhoto(channelId, fileId, {
+            caption: caption,
+            parse_mode: 'HTML',
+            reply_markup: inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined
+        });
+
+        ctx.reply('✅ عکس با موفقیت ارسال شد.');
+        // پاک کردن سشن‌های مربوط به عکس
+        delete ctx.session.photoFileId;
+        delete ctx.session.photoCaption;
+        delete ctx.session.photoMessageButtons;
+        delete ctx.session.photoMode;
+        delete ctx.session.selectedChannel;
+        delete ctx.session.currentButtonText;
+        delete ctx.session.step;
+        
+        return showAdminPanel(ctx);
+    } catch (error) {
+        console.error('خطا در ارسال عکس:', error);
+        return ctx.reply(`❌ خطا: ${error.message} - لطفاً دوباره تلاش کنید.`);
+    }
+});
+
 // ========================
 // زمانبندی پیام
 // ========================
@@ -888,6 +954,23 @@ bot.on('message', async (ctx) => {
             return;
         }
 
+        // بررسی وجود عکس در پیام
+        if (ctx.message.photo && ctx.session.step === 'send_message_text') {
+            // دریافت شناسه فایل عکس (آخرین عکس در آرایه با کیفیت‌ترین است)
+            const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+            const caption = ctx.message.caption || '';
+            
+            ctx.session.photoMode = true;
+            ctx.session.photoFileId = fileId;
+            ctx.session.photoCaption = caption;
+            
+            return ctx.reply('عکس با موفقیت دریافت شد. آیا می‌خواهید دکمه شیشه‌ای (لینک) اضافه کنید؟',
+                Markup.inlineKeyboard([
+                    [Markup.button.callback('✅ بله، اضافه کن', 'photo_add_buttons')],
+                    [Markup.button.callback('❌ خیر، ارسال بدون دکمه', 'send_photo_now')]
+                ]));
+        }
+
         const step = ctx.session.step;
 
         // افزودن کانال
@@ -941,8 +1024,8 @@ bot.on('message', async (ctx) => {
 
         // لینک دکمه
         else if (step === 'add_button_url') {
-            // هر لینکی را بدون بررسی قبول می‌کنیم
-            const url = ctx.message.text.trim();
+            // هر لینکی را دقیقاً همانطور که وارد شده بدون تغییر قبول می‌کنیم
+            const url = ctx.message.text;
             
             // ساختار دکمه‌های خالی را ایجاد می‌کنیم اگر وجود نداشته باشند
             if (!ctx.session.messageButtons) ctx.session.messageButtons = [];
