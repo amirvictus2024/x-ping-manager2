@@ -887,20 +887,30 @@ bot.on('message', async (ctx) => {
         else if (step === 'add_button_text') {
             ctx.session.currentButtonText = ctx.message.text;
             ctx.session.step = 'add_button_url';
-            return ctx.reply('لینک دکمه را وارد کنید (با https:// یا http://):');
+            return ctx.reply('لینک دکمه را وارد کنید (با https:// یا http:// یا t.me/ یا tg://):');
         }
 
         // لینک دکمه
         else if (step === 'add_button_url') {
             const url = ctx.message.text.trim();
-            if (!url.startsWith('http://') && !url.startsWith('https://')) {
-                return ctx.reply('لینک باید با http:// یا https:// شروع شود. لطفاً مجدداً وارد کنید:');
+            // پشتیبانی از لینک‌های تلگرام (با t.me یا tg:// شروع می‌شوند)
+            if (!url.startsWith('http://') && !url.startsWith('https://') &&
+                !url.startsWith('t.me/') && !url.startsWith('https://t.me/') &&
+                !url.startsWith('tg://')) {
+                return ctx.reply('لینک باید با http:// یا https:// یا t.me/ یا tg:// شروع شود. لطفاً مجدداً وارد کنید:');
+            }
+
+            // تصحیح لینک‌های t.me بدون https://
+            let finalUrl = url;
+            if (url.startsWith('t.me/') && !url.startsWith('https://t.me/')) {
+                finalUrl = 'https://' + url;
             }
 
             if (!ctx.session.messageButtons) ctx.session.messageButtons = [];
             if (!ctx.session.delayMessageButtons) ctx.session.delayMessageButtons = [];
+            if (!ctx.session.photoMessageButtons) ctx.session.photoMessageButtons = [];
 
-            const buttonInfo = { text: ctx.session.currentButtonText, url: url };
+            const buttonInfo = { text: ctx.session.currentButtonText, url: finalUrl };
 
             if (ctx.session.messageText) {
                 ctx.session.messageButtons.push(buttonInfo);
@@ -919,6 +929,15 @@ bot.on('message', async (ctx) => {
                     Markup.inlineKeyboard([
                         [Markup.button.callback('➕ اضافه کردن دکمه دیگر', 'delay_add_buttons')],
                         [Markup.button.callback('✅ ارسال پیام', 'send_delay_message_now')]
+                    ]));
+            } else if (ctx.session.photoMode) {
+                ctx.session.photoMessageButtons.push(buttonInfo);
+                const buttonsText = ctx.session.photoMessageButtons.map(btn => `- ${btn.text}`).join('\n');
+
+                return ctx.reply(`دکمه اضافه شد. دکمه‌های فعلی:\n${buttonsText}\n\nآیا دکمه دیگری اضافه می‌کنید؟`,
+                    Markup.inlineKeyboard([
+                        [Markup.button.callback('➕ اضافه کردن دکمه دیگر', 'photo_add_buttons')],
+                        [Markup.button.callback('✅ ارسال عکس با دکمه', 'send_photo_now')]
                     ]));
             }
         }
