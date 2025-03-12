@@ -58,8 +58,8 @@ function adminMiddleware(ctx, next) {
 }
 
 // Main admin panel
-function showAdminPanel(ctx) {
-  ctx.reply('🖥 پنل مدیریت کانال', {
+async function showAdminPanel(ctx) {
+  await ctx.reply('🖥 پنل مدیریت کانال', {
     reply_markup: Markup.inlineKeyboard([
       [Markup.button.callback('📝 ارسال پیام', 'send_message')],
       [Markup.button.callback('⏱ زمانبندی پیام', 'schedule_message')],
@@ -73,19 +73,22 @@ function showAdminPanel(ctx) {
   });
 }
 
+// Initialize bot
+const bot = new Telegraf(BOT_TOKEN);
+
 // Setup commands
-bot.start((ctx) => {
+bot.start(async (ctx) => {
   if (isAdmin(ctx)) {
-    ctx.reply(`سلام ${ctx.from.first_name}! به ربات مدیریت کانال خوش آمدید.`);
+    await ctx.reply(`سلام ${ctx.from.first_name}! به ربات مدیریت کانال خوش آمدید.`);
     showAdminPanel(ctx);
   } else {
-    ctx.reply('این ربات فقط برای مدیر قابل استفاده است.');
+    await ctx.reply('این ربات فقط برای مدیر قابل استفاده است.');
   }
 });
 
-bot.help((ctx) => {
+bot.help(async (ctx) => {
   if (isAdmin(ctx)) {
-    ctx.reply(`
+    await ctx.reply(`
 🔹 راهنمای ربات مدیریت کانال:
 
 /start - شروع کار با ربات
@@ -95,8 +98,8 @@ bot.help((ctx) => {
   }
 });
 
-bot.command('panel', adminMiddleware, (ctx) => {
-  showAdminPanel(ctx);
+bot.command('panel', adminMiddleware, async (ctx) => {
+  await showAdminPanel(ctx);
 });
 
 // Handle inline buttons
@@ -333,7 +336,7 @@ bot.action('back_to_main', adminMiddleware, async (ctx) => {
 });
 
 // Handle text messages for various steps
-bot.on('text', (ctx) => {
+bot.on('text', async (ctx) => {
   if (!isAdmin(ctx)) return;
 
   const text = ctx.message.text;
@@ -607,13 +610,13 @@ bot.action('send_message_now', adminMiddleware, async (ctx) => {
       reply_markup: inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined
     });
 
-    ctx.reply('✅ پیام با موفقیت ارسال شد.', {
+    await ctx.reply('✅ پیام با موفقیت ارسال شد.', {
       reply_markup: Markup.inlineKeyboard([
         [Markup.button.callback('🔙 بازگشت به منوی اصلی', 'back_to_main')]
       ])
     });
   } catch (error) {
-    ctx.reply(`❌ خطا در ارسال پیام: ${error.message}`, {
+    await ctx.reply(`❌ خطا در ارسال پیام: ${error.message}`, {
       reply_markup: Markup.inlineKeyboard([
         [Markup.button.callback('🔙 بازگشت', 'back_to_main')]
       ])
