@@ -1,6 +1,13 @@
 {
   "scheduledMessages": [],
   "welcomeMessages": {},
-  "channels": [],
+  "channels": [
+    {
+      "id": "-1002445085097",
+      "title": "ایکس پینگ",
+      "username": "xping_team",
+      "type": "channel"
+    }
+  ],
   "delayedMessages": []
 }
