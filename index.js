@@ -59,19 +59,22 @@ bot.catch((err, ctx) => {
 function showAdminPanel(ctx) {
     return ctx.reply('🖥 پنل مدیریت:', Markup.inlineKeyboard([
         [
-            Markup.button.callback('📝 پیام', 'send_message'),
-            Markup.button.callback('⏱ زمانبندی', 'schedule_message')
+            Markup.button.callback('📺 مدیریت کانال‌ها', 'manage_channels')
         ],
         [
-            Markup.button.callback('⏲ تأخیر', 'delay_message'),
-            Markup.button.callback('📊 نظرسنجی', 'create_poll')
+            Markup.button.callback('📝 ارسال به کانال', 'channel_messages'),
+            Markup.button.callback('👤 ارسال به کاربر', 'user_messages')
         ],
         [
-            Markup.button.callback('👋 خوشامد', 'set_welcome'),
-            Markup.button.callback('👥 اعضا', 'get_members')
+            Markup.button.callback('⏱ زمانبندی', 'schedule_message'),
+            Markup.button.callback('⏲ تأخیر', 'delay_message')
         ],
         [
-            Markup.button.callback('📺 کانال‌ها', 'manage_channels'),
+            Markup.button.callback('📊 نظرسنجی', 'create_poll'),
+            Markup.button.callback('👋 خوشامد', 'set_welcome')
+        ],
+        [
+            Markup.button.callback('👥 اعضا', 'get_members'),
             Markup.button.callback('🔄 پیام‌ها', 'manage_messages')
         ]
     ]));
@@ -189,6 +192,34 @@ bot.action(/delete_channel:(.+)/, async (ctx) => {
 // ========================
 // ارسال پیام به کانال با دکمه‌های شیشه‌ای
 // ========================
+bot.action('channel_messages', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        return ctx.reply('انتخاب کنید:', Markup.inlineKeyboard([
+            [Markup.button.callback('📝 ارسال به یک کانال', 'send_message')],
+            [Markup.button.callback('📢 ارسال همزمان به چند کانال', 'multi_message')],
+            [Markup.button.callback('🔙 بازگشت', 'panel')]
+        ]));
+    } catch (error) {
+        console.error('خطا:', error);
+        return ctx.reply(`خطا: ${error.message}`);
+    }
+});
+
+bot.action('user_messages', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        return ctx.reply('انتخاب کنید:', Markup.inlineKeyboard([
+            [Markup.button.callback('👤 ارسال به یک کاربر', 'send_private')],
+            [Markup.button.callback('👥 ارسال به چند کاربر', 'multi_private')],
+            [Markup.button.callback('🔙 بازگشت', 'panel')]
+        ]));
+    } catch (error) {
+        console.error('خطا:', error);
+        return ctx.reply(`خطا: ${error.message}`);
+    }
+});
+
 bot.action('send_message', async (ctx) => {
     try {
         await ctx.answerCbQuery();
@@ -281,7 +312,7 @@ bot.action('send_message_now', async (ctx) => {
         delete ctx.session.selectedChannel;
         delete ctx.session.currentButtonText;
         delete ctx.session.step;
-        
+
         return showAdminPanel(ctx);
     } catch (error) {
         console.error('خطا در ارسال پیام:', error);
@@ -347,7 +378,7 @@ bot.action('send_photo_now', async (ctx) => {
         delete ctx.session.selectedChannel;
         delete ctx.session.currentButtonText;
         delete ctx.session.step;
-        
+
         return showAdminPanel(ctx);
     } catch (error) {
         console.error('خطا در ارسال عکس:', error);
@@ -614,7 +645,7 @@ bot.action('send_delay_message_now', async (ctx) => {
         delete ctx.session.delayMinutes;
         delete ctx.session.currentButtonText;
         delete ctx.session.step;
-        
+
         return showAdminPanel(ctx);
     } catch (error) {
         console.error('خطا در تنظیم پیام تأخیری:', error);
@@ -959,11 +990,11 @@ bot.on('message', async (ctx) => {
             // دریافت شناسه فایل عکس (آخرین عکس در آرایه با کیفیت‌ترین است)
             const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
             const caption = ctx.message.caption || '';
-            
+
             ctx.session.photoMode = true;
             ctx.session.photoFileId = fileId;
             ctx.session.photoCaption = caption;
-            
+
             return ctx.reply('عکس با موفقیت دریافت شد. آیا می‌خواهید دکمه شیشه‌ای (لینک) اضافه کنید؟',
                 Markup.inlineKeyboard([
                     [Markup.button.callback('✅ بله، اضافه کن', 'photo_add_buttons')],
@@ -1026,7 +1057,7 @@ bot.on('message', async (ctx) => {
         else if (step === 'add_button_url') {
             // هر لینکی را دقیقاً همانطور که وارد شده بدون تغییر قبول می‌کنیم
             const url = ctx.message.text;
-            
+
             // ساختار دکمه‌های خالی را ایجاد می‌کنیم اگر وجود نداشته باشند
             if (!ctx.session.messageButtons) ctx.session.messageButtons = [];
             if (!ctx.session.delayMessageButtons) ctx.session.delayMessageButtons = [];
@@ -1319,4 +1350,222 @@ process.once('SIGINT', () => {
 process.once('SIGTERM', () => {
     bot.stop('SIGTERM');
     console.log('ربات متوقف شد.');
+});
+
+bot.action('multi_message', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        if (botData.channels.length === 0) {
+            return ctx.reply('هیچ کانالی اضافه نشده است. ابتدا کانال اضافه کنید.',
+                Markup.inlineKeyboard([[Markup.button.callback('➕ افزودن کانال', 'add_channel')]]));
+        }
+
+        const keyboard = [];
+        for (let i = 0; i < botData.channels.length; i++) {
+            keyboard.push([Markup.button.callback(botData.channels[i].title, `select_channel:${botData.channels[i].id}`)]);
+        }
+        keyboard.push([Markup.button.callback('✅ ارسال به کانال‌های انتخاب شده', 'confirm_multi_message')]);
+        ctx.session.step = 'multi_message_select_channels';
+        ctx.session.selectedChannels = [];
+        return ctx.reply('کانال‌های مورد نظر را انتخاب کنید:', Markup.inlineKeyboard(keyboard));
+    } catch (error) {
+        console.error('خطا در ارسال همزمان به چند کانال', error);
+        return ctx.reply(`خطا: ${error.message}`);
+    }
+});
+
+bot.action(/select_channel:(.+)/, async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const channelId = ctx.match[1];
+        const selectedChannels = ctx.session.selectedChannels || [];
+        if (selectedChannels.includes(channelId)) {
+            ctx.session.selectedChannels = selectedChannels.filter(id => id !== channelId);
+            return ctx.reply(`کانال ${channelId} از لیست انتخاب شده حذف شد.`);
+        } else {
+            ctx.session.selectedChannels.push(channelId);
+            return ctx.reply(`کانال ${channelId} به لیست انتخاب شده اضافه شد.`);
+        }
+    } catch (error) {
+        console.error('خطا در انتخاب کانال:', error);
+        return ctx.reply(`خطا: ${error.message}`);
+    }
+});
+
+bot.action('confirm_multi_message', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        if (!ctx.session.selectedChannels || ctx.session.selectedChannels.length === 0) {
+            return ctx.reply('هیچ کانالی انتخاب نشده است.');
+        }
+        ctx.session.step = 'multi_message_file';
+        return ctx.reply('فایل یا پیام مورد نظر را ارسال کنید.\nبرای ارسال به پیوی، از دستور /send_private استفاده کنید.');
+    } catch (error) {
+        console.error('خطا در تأیید ارسال همزمان:', error);
+        return ctx.reply(`خطا: ${error.message}`);
+    }
+});
+
+// ارسال به پیوی با دکمه شیشه‌ای
+bot.command('send_private', async (ctx) => {
+    try {
+        if (!isAdmin(ctx)) {
+            return ctx.reply('⛔️ شما دسترسی به این بخش را ندارید.');
+        }
+        return ctx.reply('پیام خود را وارد کنید و سپس با دکمه شیشه‌ای گیرنده را انتخاب خواهید کرد.',
+            Markup.inlineKeyboard([
+                [Markup.button.callback('🔙 بازگشت', 'panel')]
+            ])
+        );
+    } catch (error) {
+        console.error('خطا در شروع ارسال پیام خصوصی:', error);
+        return ctx.reply(`خطا: ${error.message}`);
+    }
+});
+
+// دریافت پیام و نمایش دکمه برای انتخاب گیرنده
+bot.on('message', async (ctx) => {
+    if (!ctx.session.step && ctx.message.text && ctx.message.text !== '/send_private') {
+        ctx.session.privateMessage = ctx.message.text;
+        return ctx.reply('پیام شما: ' + ctx.message.text + '\n\nحالا گیرنده را انتخاب کنید:',
+            Markup.inlineKeyboard([
+                [Markup.button.callback('👤 کاربر جدید', 'new_recipient')],
+                [Markup.button.callback('✅ تأیید و ارسال', 'confirm_send_private')],
+                [Markup.button.callback('❌ لغو', 'cancel_private')]
+            ])
+        );
+    }
+    // ... بقیه کد
+});
+
+// انتخاب گیرنده جدید
+bot.action('new_recipient', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        ctx.session.step = 'wait_for_user_id';
+        return ctx.reply('آیدی عددی کاربر مورد نظر را وارد کنید:');
+    } catch (error) {
+        console.error('خطا در انتخاب گیرنده:', error);
+        return ctx.reply(`خطا: ${error.message}`);
+    }
+});
+
+// تأیید و ارسال پیام
+bot.action('confirm_send_private', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        if (!ctx.session.recipientId) {
+            return ctx.reply('لطفاً ابتدا یک گیرنده انتخاب کنید.');
+        }
+        await bot.telegram.sendMessage(ctx.session.recipientId, ctx.session.privateMessage);
+        ctx.reply('✅ پیام با موفقیت ارسال شد.');
+        delete ctx.session.privateMessage;
+        delete ctx.session.recipientId;
+        delete ctx.session.step;
+        return showAdminPanel(ctx);
+    } catch (error) {
+        console.error('خطا در ارسال پیام:', error);
+        return ctx.reply(`خطا: ${error.message}`);
+    }
+});
+
+// لغو ارسال پیام
+bot.action('cancel_private', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        delete ctx.session.privateMessage;
+        delete ctx.session.recipientId;
+        delete ctx.session.step;
+        ctx.reply('❌ ارسال پیام لغو شد.');
+        return showAdminPanel(ctx);
+    } catch (error) {
+        console.error('خطا در لغو ارسال:', error);
+        return ctx.reply(`خطا: ${error.message}`);
+    }
+});
+
+// پردازش پیام خصوصی
+bot.on('message', async (ctx) => {
+    if (ctx.session.step === 'send_private_user_id') {
+        try {
+            const userId = ctx.message.text.trim();
+            if (!/^\d+$/.test(userId)) {
+                return ctx.reply('لطفاً یک آیدی عددی معتبر وارد کنید.');
+            }
+            ctx.session.privateMessageUserId = userId;
+            ctx.session.step = 'send_private_message';
+            return ctx.reply('متن پیام را وارد کنید:');
+        } catch (error) {
+            console.error('خطا در پردازش آیدی کاربر:', error);
+            return ctx.reply(`خطا: ${error.message}`);
+        }
+    } else if (ctx.session.step === 'send_private_message') {
+        try {
+            const messageText = ctx.message.text;
+            const userId = ctx.session.privateMessageUserId;
+            
+            return ctx.reply('آیا می‌خواهید دکمه شیشه‌ای اضافه کنید؟', 
+                Markup.inlineKeyboard([
+                    [Markup.button.callback('✅ بله', 'add_private_button')],
+                    [Markup.button.callback('❌ خیر', 'send_private_now')]
+                ])
+            );
+            
+            ctx.session.privateMessageText = messageText;
+        } catch (error) {
+            console.error('خطا در پردازش پیام خصوصی:', error);
+            return ctx.reply(`خطا: ${error.message}`);
+        }
+    }
+    // ادامه پردازش‌های قبلی...
+});
+
+// اضافه کردن دکمه به پیام خصوصی
+bot.action('add_private_button', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        ctx.session.step = 'add_private_button_text';
+        return ctx.reply('متن دکمه را وارد کنید:');
+    } catch (error) {
+        console.error('خطا در افزودن دکمه:', error);
+        return ctx.reply(`خطا: ${error.message}`);
+    }
+});
+
+// ارسال پیام خصوصی
+bot.action('send_private_now', async (ctx) => {
+    try {
+        await ctx.answerCbQuery();
+        const userId = ctx.session.privateMessageUserId;
+        const messageText = ctx.session.privateMessageText;
+        const buttons = ctx.session.privateMessageButtons || [];
+
+        const inlineKeyboard = [];
+        if (buttons.length > 0) {
+            for (let i = 0; i < buttons.length; i += 2) {
+                const row = [];
+                row.push({ text: buttons[i].text, url: buttons[i].url });
+                if (buttons[i + 1]) {
+                    row.push({ text: buttons[i + 1].text, url: buttons[i + 1].url });
+                }
+                inlineKeyboard.push(row);
+            }
+        }
+
+        await bot.telegram.sendMessage(userId, messageText, {
+            parse_mode: 'HTML',
+            reply_markup: inlineKeyboard.length > 0 ? { inline_keyboard: inlineKeyboard } : undefined
+        });
+
+        ctx.reply('✅ پیام خصوصی با موفقیت ارسال شد.');
+        delete ctx.session.privateMessageUserId;
+        delete ctx.session.privateMessageText;
+        delete ctx.session.privateMessageButtons;
+        delete ctx.session.step;
+
+        return showAdminPanel(ctx);
+    } catch (error) {
+        console.error('خطا در ارسال پیام خصوصی:', error);
+        return ctx.reply(`خطا: ${error.message}`);
+    }
 });
